@@ -35,7 +35,7 @@ const Ranking = ({ usuarios }) => {
     setIsLoading(true); // Ativa o loader
     try {
       const respostaLeads = await fetch(
-        'https://script.google.com/macros/s/AKfycby8vujvd5ybEpkaZ0kwZecAWOdaL0XJR84oKJBAIR9dVYeTCv7iSdTdHQWBb7YCp349/exec?v=pegar_clientes_fechados'
+        'https://script.google.com/macros/s/AKfycbzSkLIDEJUeJMf8cQestU8jVAaafHPPStvYsnsJMbgoNyEXHkmz4eXica0UOEdUQFea/exec?v=pegar_clientes_fechados'
       );
       const dados = await respostaLeads.json();
       setLeads(dados);
