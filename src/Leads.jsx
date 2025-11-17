@@ -2,9 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Lead from './components/Lead';
 import { RefreshCcw, Bell, Search } from 'lucide-react';
 
-const GOOGLE_SHEETS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzSkLIDEJUeJMf8cQestU8jVAaafHPPStvYsnsJMbgoNyEXHkmz4eXica0UOEdUQFea/exec';
-const ALTERAR_ATRIBUIDO_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzSkLIDEJUeJMf8cQestU8jVAaafHPPStvYsnsJMbgoNyEXHkmz4eXica0UOEdUQFea/exec?v=alterar_atribuido';
-const SALVAR_OBSERVACAO_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzSkLIDEJUeJMf8cQestU8jVAaafHPPStvYsnsJMbgoNyEXHkmz4eXica0UOEdUQFea/exec?action=salvarObservacao';
+const GOOGLE_SHEETS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby8vujvd5ybEpkaZ0kwZecAWOdaL0XJR84oKJBAIR9dVYeTCv7iSdTdHQWBb7YCp349/exec';
+const ALTERAR_ATRIBUIDO_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby8vujvd5ybEpkaZ0kwZecAWOdaL0XJR84oKJBAIR9dVYeTCv7iSdTdHQWBb7YCp349/exec?v=alterar_atribuido';
+const SALVAR_OBSERVACAO_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby8vujvd5ybEpkaZ0kwZecAWOdaL0XJR84oKJBAIR9dVYeTCv7iSdTdHQWBb7YCp349/exec?action=salvarObservacao';
 
 const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado, fetchLeadsFromSheet, scrollContainerRef, onConfirmAgendamento, salvarObservacao, saveLocalChange }) => {
   const [selecionados, setSelecionados] = useState({});
@@ -197,62 +197,73 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
     }));
   };
 
-  const handleEnviar = (leadId) => {
+  const handleEnviar = async (leadId) => {
     const userId = selecionados[leadId];
     if (!userId) {
       alert('Selecione um usuário antes de enviar.');
       return;
     }
+
+    // 1) Atualiza UI local
     transferirLead(leadId, userId);
+
     const lead = leads.find((l) => l.id === leadId);
     if (!lead) return;
     const leadAtualizado = { ...lead, usuarioId: userId, responsavel: usuarios.find(u => u.id == userId)?.nome || '' };
 
-    // Salva alteração local (será sincronizada após 5 minutos)
+    // 2) Salva alteração local para retry/sync (opcional)
     if (typeof saveLocalChange === 'function') {
       saveLocalChange({
         id: leadId,
         type: 'assign_user',
         data: leadAtualizado
       });
-    } else {
-      // Fallback: tenta enviar imediatamente (antigo comportamento)
-      fetch(ALTERAR_ATRIBUIDO_SCRIPT_URL, {
+    }
+
+    // 3) Envia imediatamente para o endpoint de atribuição (como antes)
+    try {
+      await fetch(ALTERAR_ATRIBUIDO_SCRIPT_URL, {
         method: 'POST',
         mode: 'no-cors',
         body: JSON.stringify(leadAtualizado),
         headers: {
           'Content-Type': 'application/json',
         },
-      }).then(() => {
+      });
+      // Recarrega os leads após envio para garantir sincronia (mantemos merge no fetch)
+      setTimeout(() => {
         fetchLeadsFromSheet();
-      }).catch(err => console.error('Erro ao enviar lead:', err));
+      }, 700);
+    } catch (error) {
+      console.error('Erro ao enviar lead de atribuição:', error);
+      // Em erro, mantemos a alteração local (saveLocalChange) para tentar sincronizar depois
     }
   };
 
   const enviarLeadAtualizado = async (lead) => {
-    // Este método agora delega para saveLocalChange — mantido para compatibilidade
+    // Mantido por compatibilidade: encaminha para saveLocalChange + envio imediato
     if (typeof saveLocalChange === 'function') {
       saveLocalChange({
         id: lead.id,
         type: 'assign_user',
         data: lead
       });
-      // não chamamos fetchLeadsFromSheet() imediatamente para evitar reset
-    } else {
-      try {
-        await fetch(ALTERAR_ATRIBUIDO_SCRIPT_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-          body: JSON.stringify(lead),
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
+    }
+
+    try {
+      await fetch(ALTERAR_ATRIBUIDO_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        body: JSON.stringify(lead),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      setTimeout(() => {
         fetchLeadsFromSheet();
-      } catch (error) {
-        console.error('Erro ao enviar lead:', error);
-      }
+      }, 700);
+    } catch (error) {
+      console.error('Erro ao enviar lead:', error);
     }
   };
 
@@ -323,17 +334,21 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
 
     setIsLoading(true);
     try {
-      // Salva localmente em vez de enviar de imediato
+      // 1) Salva localmente (opcional) para retry/sync
       if (typeof saveLocalChange === 'function') {
         saveLocalChange({
           id: leadId,
           type: 'salvarObservacao',
           data: { leadId, observacao: observacaoTexto }
         });
-        // atualiza UI local
+      }
+
+      // 2) Envia imediatamente (comportamento original) usando a função passada pelo App
+      if (typeof salvarObservacao === 'function') {
+        await salvarObservacao(leadId, observacaoTexto);
         setIsEditingObservacao(prev => ({ ...prev, [leadId]: false }));
       } else {
-        // fallback para envio imediato (antigo comportamento)
+        // fallback: enviar direto para o endpoint antigo (se a prop não estiver disponível)
         await fetch(SALVAR_OBSERVACAO_SCRIPT_URL, {
           method: 'POST',
           mode: 'no-cors',
@@ -346,7 +361,7 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
           },
         });
         setIsEditingObservacao(prev => ({ ...prev, [leadId]: false }));
-        fetchLeadsFromSheet();
+        setTimeout(() => fetchLeadsFromSheet(), 700);
       }
     } catch (error) {
       console.error('Erro ao salvar observação:', error);
@@ -382,15 +397,12 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
         type: 'status_update',
         data: { id: leadId, status: novoStatus, phone }
       });
-    } else {
-      // fallback: tenta atualizar imediatamente via fetch (não recomendado se quiser evitar reset)
-      fetch(GOOGLE_SHEETS_SCRIPT_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        body: JSON.stringify({ action: 'status_update', id: leadId, status: novoStatus, phone }),
-        headers: { 'Content-Type': 'application/json' }
-      }).then(() => fetchLeadsFromSheet()).catch(err => console.error(err));
     }
+
+    // Mantemos o fetch para atualizar a lista (o merge evitará "reset" se houver alteração local)
+    setTimeout(() => {
+      fetchLeadsFromSheet();
+    }, 500);
   };
 
   return (
