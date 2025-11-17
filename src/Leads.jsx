@@ -6,7 +6,7 @@ const GOOGLE_SHEETS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby8vuj
 const ALTERAR_ATRIBUIDO_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby8vujvd5ybEpkaZ0kwZecAWOdaL0XJR84oKJBAIR9dVYeTCv7iSdTdHQWBb7YCp349/exec?v=alterar_atribuido';
 const SALVAR_OBSERVACAO_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby8vujvd5ybEpkaZ0kwZecAWOdaL0XJR84oKJBAIR9dVYeTCv7iSdTdHQWBb7YCp349/exec?action=salvarObservacao';
 
-const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado, fetchLeadsFromSheet, scrollContainerRef, onConfirmAgendamento, salvarObservacao, saveLocalChange }) => {
+const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado, fetchLeadsFromSheet, scrollContainerRef }) => {
   const [selecionados, setSelecionados] = useState({});
   const [paginaAtual, setPaginaAtual] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
@@ -31,15 +31,6 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
     setIsEditingObservacao(initialIsEditingObservacao);
   }, [leads]);
 
-  useEffect(() => {
-    const anyEditing = Object.values(isEditingObservacao).some(Boolean);
-    if (!anyEditing) {
-      // removido fetch imediato para evitar reset; fetch periódicos em App.jsx vão sincronizar/atualizar
-      const interval = setInterval(fetchLeadsFromSheet, 300000);
-      return () => clearInterval(interval);
-    }
-  }, [isEditingObservacao, fetchLeadsFromSheet]);
-
   const normalizarTexto = (texto = '') => {
     return texto
       .toString()
@@ -60,6 +51,7 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
     const today = new Date().toLocaleDateString('pt-BR');
 
     leads.forEach(lead => {
+      // Ignorar Fechado e Perdido do total Geral (pendentes)
       if (lead.status !== 'Fechado' && lead.status !== 'Perdido') {
         todosCount++;
       }
@@ -68,13 +60,13 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
         emContatoCount++;
       } else if (lead.status === 'Sem Contato') {
         semContatoCount++;
-      } else if (lead.status && lead.status.startsWith('Agendado')) {
+      } else if (lead.status.startsWith('Agendado')) {
         const statusDateStr = lead.status.split(' - ')[1];
         if (statusDateStr) {
           const [dia, mes, ano] = statusDateStr.split('/');
           const statusDateFormatted = new Date(`${ano}-${mes}-${dia}T00:00:00`).toLocaleDateString('pt-BR');
           if (statusDateFormatted === today) {
-            agendadosCount++;
+            agendadosCount++; // Contagem apenas para agendados de hoje
           }
         }
       }
@@ -91,6 +83,7 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
 
 
   useEffect(() => {
+    // Usamos a contagem 'agendadosHoje' do useMemo
     setHasScheduledToday(contagens.agendadosHoje > 0);
   }, [contagens]);
 
@@ -197,59 +190,19 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
     }));
   };
 
-  const handleEnviar = async (leadId) => {
+  const handleEnviar = (leadId) => {
     const userId = selecionados[leadId];
     if (!userId) {
       alert('Selecione um usuário antes de enviar.');
       return;
     }
-
-    // 1) Atualiza UI local
     transferirLead(leadId, userId);
-
     const lead = leads.find((l) => l.id === leadId);
-    if (!lead) return;
-    const leadAtualizado = { ...lead, usuarioId: userId, responsavel: usuarios.find(u => u.id == userId)?.nome || '' };
-
-    // 2) Salva alteração local para retry/sync (opcional)
-    if (typeof saveLocalChange === 'function') {
-      saveLocalChange({
-        id: leadId,
-        type: 'assign_user',
-        data: leadAtualizado
-      });
-    }
-
-    // 3) Envia imediatamente para o endpoint de atribuição (como antes)
-    try {
-      await fetch(ALTERAR_ATRIBUIDO_SCRIPT_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        body: JSON.stringify(leadAtualizado),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      // Recarrega os leads após envio para garantir sincronia (mantemos merge no fetch)
-      setTimeout(() => {
-        fetchLeadsFromSheet();
-      }, 700);
-    } catch (error) {
-      console.error('Erro ao enviar lead de atribuição:', error);
-      // Em erro, mantemos a alteração local (saveLocalChange) para tentar sincronizar depois
-    }
+    const leadAtualizado = { ...lead, usuarioId: userId };
+    enviarLeadAtualizado(leadAtualizado);
   };
 
   const enviarLeadAtualizado = async (lead) => {
-    // Mantido por compatibilidade: encaminha para saveLocalChange + envio imediato
-    if (typeof saveLocalChange === 'function') {
-      saveLocalChange({
-        id: lead.id,
-        type: 'assign_user',
-        data: lead
-      });
-    }
-
     try {
       await fetch(ALTERAR_ATRIBUIDO_SCRIPT_URL, {
         method: 'POST',
@@ -259,9 +212,7 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
           'Content-Type': 'application/json',
         },
       });
-      setTimeout(() => {
-        fetchLeadsFromSheet();
-      }, 700);
+      fetchLeadsFromSheet();
     } catch (error) {
       console.error('Erro ao enviar lead:', error);
     }
@@ -334,35 +285,19 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
 
     setIsLoading(true);
     try {
-      // 1) Salva localmente (opcional) para retry/sync
-      if (typeof saveLocalChange === 'function') {
-        saveLocalChange({
-          id: leadId,
-          type: 'salvarObservacao',
-          data: { leadId, observacao: observacaoTexto }
-        });
-      }
-
-      // 2) Envia imediatamente (comportamento original) usando a função passada pelo App
-      if (typeof salvarObservacao === 'function') {
-        await salvarObservacao(leadId, observacaoTexto);
-        setIsEditingObservacao(prev => ({ ...prev, [leadId]: false }));
-      } else {
-        // fallback: enviar direto para o endpoint antigo (se a prop não estiver disponível)
-        await fetch(SALVAR_OBSERVACAO_SCRIPT_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-          body: JSON.stringify({
-            leadId: leadId,
-            observacao: observacaoTexto,
-          }),
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-        setIsEditingObservacao(prev => ({ ...prev, [leadId]: false }));
-        setTimeout(() => fetchLeadsFromSheet(), 700);
-      }
+      await fetch(SALVAR_OBSERVACAO_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        body: JSON.stringify({
+          leadId: leadId,
+          observacao: observacaoTexto,
+        }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      setIsEditingObservacao(prev => ({ ...prev, [leadId]: false }));
+      fetchLeadsFromSheet();
     } catch (error) {
       console.error('Erro ao salvar observação:', error);
       alert('Erro ao salvar observação. Por favor, tente novamente.');
@@ -376,11 +311,9 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
   };
 
   const handleConfirmStatus = (leadId, novoStatus, phone) => {
-    // Atualiza estado local imediatamente
     onUpdateStatus(leadId, novoStatus, phone);
-
     const currentLead = leads.find(l => l.id === leadId);
-    const hasNoObservacao = !currentLead?.observacao || currentLead.observacao.trim() === '';
+    const hasNoObservacao = !currentLead.observacao || currentLead.observacao.trim() === '';
 
     if ((novoStatus === 'Em Contato' || novoStatus === 'Sem Contato' || novoStatus.startsWith('Agendado')) && hasNoObservacao) {
         setIsEditingObservacao(prev => ({ ...prev, [leadId]: true }));
@@ -389,20 +322,7 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
     } else {
         setIsEditingObservacao(prev => ({ ...prev, [leadId]: false }));
     }
-
-    // Salva a alteração local (será sincronizada após TTL)
-    if (typeof saveLocalChange === 'function') {
-      saveLocalChange({
-        id: leadId,
-        type: 'status_update',
-        data: { id: leadId, status: novoStatus, phone }
-      });
-    }
-
-    // Mantemos o fetch para atualizar a lista (o merge evitará "reset" se houver alteração local)
-    setTimeout(() => {
-      fetchLeadsFromSheet();
-    }, 500);
+    fetchLeadsFromSheet();
   };
 
   return (
@@ -525,7 +445,7 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
           Sem Contato <span className="text-sm font-extrabold ml-1">({contagens.semContato})</span>
         </button>
 
-        {contagens.agendadosHoje > 0 && (
+        {contagens.agendadosHoje > 0 && ( /* Usamos a contagem para exibir o botão, mesmo que `hasScheduledToday` seja o mesmo */
           <button
             onClick={() => aplicarFiltroStatus('Agendado')}
             className={`
@@ -565,7 +485,7 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
               return (
                 <div
                   key={lead.id}
-                  className="bg-white rounded-xl shadow-lg hover:shadow-xl transition duration-300 p-6 relative border-t-4 border-indigo-500"
+                  className="bg-white rounded-xl shadow-lg hover:shadow-xl transition duration-300 p-6 relative border-t-4 border-indigo-500" // Card Principal
                 >
                   
                   <div className={`grid ${hasObservacaoSection ? 'lg:grid-cols-2' : 'lg:grid-cols-1'} gap-6`}>
