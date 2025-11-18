@@ -191,14 +191,28 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
   };
 
   const handleEnviar = (leadId) => {
-    const userId = selecionados[leadId];
-    if (!userId) {
+    const userId = selecionados[lead.id] || selecionados[leadId];
+    // fallback: use selecionados[leadId]
+    const chosenUserId = selecionados[leadId];
+    const finalUserId = userId || chosenUserId;
+
+    if (!finalUserId) {
       alert('Selecione um usuário antes de enviar.');
       return;
     }
-    transferirLead(leadId, userId);
+
+    // Salva localmente a atribuição para retry/sync futuro (TTL 5 minutos gerenciado pelo App)
+    if (typeof saveLocalChange === 'function') {
+      saveLocalChange({
+        id: leadId,
+        type: 'alterarAtribuido',
+        data: { leadId, usuarioId: finalUserId }
+      });
+    }
+
+    transferirLead(leadId, finalUserId);
     const lead = leads.find((l) => l.id === leadId);
-    const leadAtualizado = { ...lead, usuarioId: userId };
+    const leadAtualizado = { ...lead, usuarioId: finalUserId };
     enviarLeadAtualizado(leadAtualizado);
   };
 
@@ -219,6 +233,15 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
   };
 
   const handleAlterar = (leadId) => {
+    // Salva localmente a remoção/alteração de atribuição (usuario null) para retry/sync futuro
+    if (typeof saveLocalChange === 'function') {
+      saveLocalChange({
+        id: leadId,
+        type: 'alterarAtribuido',
+        data: { leadId, usuarioId: null }
+      });
+    }
+
     setSelecionados((prev) => ({
       ...prev,
       [leadId]: '',
@@ -320,6 +343,15 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
   };
 
   const handleConfirmStatus = (leadId, novoStatus, phone) => {
+    // Salva localmente a alteração de status para retry/sync futuro (TTL 5 minutos gerenciado pelo App)
+    if (typeof saveLocalChange === 'function') {
+      saveLocalChange({
+        id: leadId,
+        type: 'atualizarStatus',
+        data: { leadId, status: novoStatus, phone: phone || null }
+      });
+    }
+
     onUpdateStatus(leadId, novoStatus, phone);
     const currentLead = leads.find(l => l.id === leadId);
     const hasNoObservacao = !currentLead.observacao || currentLead.observacao.trim() === '';
@@ -366,7 +398,7 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
               title="Atualizar dados"
               onClick={handleRefreshLeads}
               disabled={isLoading}
-              className={`p-3 rounded-full transition duration-300 ${isLoading ? 'text-gray-400 cursor-not-allowed' : 'text-indigo-600 hover:bg-indigo-100 shadow-sm'}`}
+              className={`p-3 rounded-full transition duração-300 ${isLoading ? 'text-gray-400 cursor-not-allowed' : 'text-indigo-600 hover:bg-indigo-100 shadow-sm'}`}
             >
               <RefreshCcw size={24} className={isLoading ? '' : 'hover:rotate-180'} />
             </button>
