@@ -6,7 +6,7 @@ const GOOGLE_SHEETS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby8vuj
 const ALTERAR_ATRIBUIDO_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby8vujvd5ybEpkaZ0kwZecAWOdaL0XJR84oKJBAIR9dVYeTCv7iSdTdHQWBb7YCp349/exec?v=alterar_atribuido';
 const SALVAR_OBSERVACAO_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby8vujvd5ybEpkaZ0kwZecAWOdaL0XJR84oKJBAIR9dVYeTCv7iSdTdHQWBb7YCp349/exec?action=salvarObservacao';
 
-const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado, fetchLeadsFromSheet, scrollContainerRef }) => {
+const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado, fetchLeadsFromSheet, scrollContainerRef, saveLocalChange }) => {
   const [selecionados, setSelecionados] = useState({});
   const [paginaAtual, setPaginaAtual] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
@@ -285,6 +285,15 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
 
     setIsLoading(true);
     try {
+      // Salva localmente para retry/sync futuro (TTL 5 minutos gerenciado pelo App)
+      if (typeof saveLocalChange === 'function') {
+        saveLocalChange({
+          id: leadId,
+          type: 'salvarObservacao',
+          data: { leadId, observacao: observacaoTexto }
+        });
+      }
+
       await fetch(SALVAR_OBSERVACAO_SCRIPT_URL, {
         method: 'POST',
         mode: 'no-cors',
@@ -350,7 +359,7 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
           </h1>
           
           {/* Botão de Refresh e Sino de Notificação (reagrupados) */}
-          <div className="flex items-center gap-4">
+          <div className="flex itens-center gap-4">
             
             {/* Botão de Refresh */}
             <button
