@@ -699,41 +699,21 @@ function App() {
 
   // ===================== NOVA FUNÇÃO: força sincronização imediata =====================
   const forceSyncWithSheets = async () => {
-    // 1) Enviar alterações locais pendentes imediatamente (se houver)
+    // Objetivo: o botão REFRESH deve ser determinante — sobrescrever o estado local com o Sheets.
     try {
+      // 1) Carrega alterações locais atuais
       loadLocalChangesFromStorage();
-      const keys = Object.keys(localChangesRef.current);
-      if (keys.length > 0) {
-        for (const k of keys) {
-          const change = localChangesRef.current[k];
-          if (!change) continue;
-          try {
-            await fetch(GOOGLE_APPS_SCRIPT_BASE_URL, {
-              method: 'POST',
-              mode: 'no-cors',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                action: change.type,
-                data: change.data,
-              }),
-            });
-            // remove local change após envio
-            delete localChangesRef.current[k];
-          } catch (err) {
-            console.warn('Erro ao enviar alteração local durante forceSync (mantendo para retry):', err);
-            // não deletar a alteração para tentativa futura
-          }
-        }
-        persistLocalChangesToStorage();
-      }
-    } catch (err) {
-      console.error('Erro ao tentar enviar alterações locais antes do sync:', err);
-    }
 
-    // 2) Solicitar ao Apps Script uma sincronização global (ex.: consolidar dados, puxar de outras abas)
-    try {
+      // 2) Limpa explicitamente as alterações locais (descarta pendentes),
+      // para garantir que o fetch venha "puro" do Sheets e não seja mesclado.
+      const hadLocalChanges = Object.keys(localChangesRef.current).length > 0;
+      if (hadLocalChanges) {
+        console.log('forceSyncWithSheets: limpando alterações locais pendentes para forçar estado do Sheets.');
+      }
+      localChangesRef.current = {};
+      persistLocalChangesToStorage();
+
+      // 3) Solicitar ao Apps Script uma sincronização global (ex.: consolidar dados, puxar de outras abas)
       try {
         await fetch(`${GOOGLE_APPS_SCRIPT_BASE_URL}?action=syncAll`, {
           method: 'POST',
@@ -744,16 +724,19 @@ function App() {
           body: JSON.stringify({ forceSync: true }),
         });
       } catch (syncErr) {
-        // no-cors pode gerar erro de leitura da resposta — aceitamos isso
+        // no-cors pode gerar erro ao ler a resposta — isso é esperado em muitos cenários com Apps Script.
         console.warn('Sync request (no-cors) enviada; a resposta pode não ser acessível no cliente.', syncErr);
       }
 
-      // Pequena espera para processamento no Apps Script
-      await new Promise((res) => setTimeout(res, 800));
+      // 4) Pequena espera para o Apps Script processar (ajuste o tempo se necessário)
+      await new Promise((res) => setTimeout(res, 900));
 
-      // 3) Buscar os dados atualizados
+      // 5) Buscar os dados atualizados diretamente do Sheets (sem aplicar alterações locais)
+      //    Para garantir que não ocorra merge, garantimos que localChangesRef está vazio antes do fetch.
       await fetchLeadsFromSheet();
       await fetchLeadsFechadosFromSheet();
+
+      console.log('forceSyncWithSheets: dados atualizados a partir do Sheets e alterações locais removidas.');
     } catch (error) {
       console.error('Erro ao forçar sincronização com Sheets:', error);
       alert('Erro ao sincronizar com o Sheets. Verifique a conexão e tente novamente.');
