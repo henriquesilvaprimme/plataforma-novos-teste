@@ -191,10 +191,7 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
   };
 
   const handleEnviar = (leadId) => {
-    const userId = selecionados[lead.id] || selecionados[leadId];
-    // fallback: use selecionados[leadId]
-    const chosenUserId = selecionados[leadId];
-    const finalUserId = userId || chosenUserId;
+    const finalUserId = selecionados[leadId];
 
     if (!finalUserId) {
       alert('Selecione um usuário antes de enviar.');
@@ -398,7 +395,7 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
               title="Atualizar dados"
               onClick={handleRefreshLeads}
               disabled={isLoading}
-              className={`p-3 rounded-full transition duração-300 ${isLoading ? 'text-gray-400 cursor-not-allowed' : 'text-indigo-600 hover:bg-indigo-100 shadow-sm'}`}
+              className={`p-3 rounded-full transition duration-300 ${isLoading ? 'text-gray-400 cursor-not-allowed' : 'text-indigo-600 hover:bg-indigo-100 shadow-sm'}`}
             >
               <RefreshCcw size={24} className={isLoading ? '' : 'hover:rotate-180'} />
             </button>
