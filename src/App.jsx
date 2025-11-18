@@ -697,6 +697,70 @@ function App() {
     }
   };
 
+  // ===================== NOVA FUNÇÃO: força sincronização imediata =====================
+  const forceSyncWithSheets = async () => {
+    // 1) Enviar alterações locais pendentes imediatamente (se houver)
+    try {
+      loadLocalChangesFromStorage();
+      const keys = Object.keys(localChangesRef.current);
+      if (keys.length > 0) {
+        for (const k of keys) {
+          const change = localChangesRef.current[k];
+          if (!change) continue;
+          try {
+            await fetch(GOOGLE_APPS_SCRIPT_BASE_URL, {
+              method: 'POST',
+              mode: 'no-cors',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                action: change.type,
+                data: change.data,
+              }),
+            });
+            // remove local change após envio
+            delete localChangesRef.current[k];
+          } catch (err) {
+            console.warn('Erro ao enviar alteração local durante forceSync (mantendo para retry):', err);
+            // não deletar a alteração para tentativa futura
+          }
+        }
+        persistLocalChangesToStorage();
+      }
+    } catch (err) {
+      console.error('Erro ao tentar enviar alterações locais antes do sync:', err);
+    }
+
+    // 2) Solicitar ao Apps Script uma sincronização global (ex.: consolidar dados, puxar de outras abas)
+    try {
+      try {
+        await fetch(`${GOOGLE_APPS_SCRIPT_BASE_URL}?action=syncAll`, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ forceSync: true }),
+        });
+      } catch (syncErr) {
+        // no-cors pode gerar erro de leitura da resposta — aceitamos isso
+        console.warn('Sync request (no-cors) enviada; a resposta pode não ser acessível no cliente.', syncErr);
+      }
+
+      // Pequena espera para processamento no Apps Script
+      await new Promise((res) => setTimeout(res, 800));
+
+      // 3) Buscar os dados atualizados
+      await fetchLeadsFromSheet();
+      await fetchLeadsFechadosFromSheet();
+    } catch (error) {
+      console.error('Erro ao forçar sincronização com Sheets:', error);
+      alert('Erro ao sincronizar com o Sheets. Verifique a conexão e tente novamente.');
+    }
+  };
+  // =============================================================================
+
   if (!isAuthenticated) {
     return (
       <div
@@ -792,6 +856,8 @@ function App() {
                 salvarObservacao={salvarObservacao}
                 // NOVO: função que salva alterações localmente para sincronizar depois
                 saveLocalChange={saveLocalChange}
+                // NOVO: função para forçar sincronização imediata com o Sheets
+                forceSyncWithSheets={forceSyncWithSheets}
               />
             }
           />
