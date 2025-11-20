@@ -28,7 +28,7 @@ function ScrollToTop({ scrollContainerRef }) {
   return null;
 }
 
-const GOOGLE_SHEETS_SCRIPT_BASE_URL = '/api/gas';
+const GOOGLE_APPS_SCRIPT_BASE_URL = '/api/gas';
 const GOOGLE_SHEETS_SCRIPT_URL = `${GOOGLE_APPS_SCRIPT_BASE_URL}?v=getLeads`;
 const GOOGLE_SHEETS_LEADS_FECHADOS = `${GOOGLE_APPS_SCRIPT_BASE_URL}?v=pegar_clientes_fechados`;
 const GOOGLE_SHEETS_USERS_AUTH_URL = `${GOOGLE_APPS_SCRIPT_BASE_URL}?v=pegar_usuario`;
