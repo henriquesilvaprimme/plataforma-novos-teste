@@ -93,7 +93,6 @@ const GerenciarUsuarios = () => {
 
       await fetch(`${GOOGLE_SHEETS_BASE_URL}?v=alterar_usuario`, {
         method: 'POST',
-        mode: 'no-cors',
         body: JSON.stringify({ usuario: novoEstadoUsuario }),
         headers: {
           'Content-Type': 'application/json',
