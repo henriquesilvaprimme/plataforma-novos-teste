@@ -37,7 +37,6 @@ const CriarUsuario = ({ adicionarUsuario }) => {
     try {
       const response = await fetch('https://script.google.com/macros/s/AKfycbzSkLIDEJUeJMf8cQestU8jVAaafHPPStvYsnsJMbgoNyEXHkmz4eXica0UOEdUQFea/exec?v=criar_usuario', {
         method: 'POST',
-        mode: 'no-cors',
         body: JSON.stringify(lead),
         headers: {
           'Content-Type': 'application/json',
