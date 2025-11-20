@@ -3,7 +3,7 @@ import { Eye, EyeOff, RefreshCcw } from 'lucide-react';
 
 // Certifique-se de que esta URL é a da SUA ÚLTIMA IMPLANTAÇÃO do Apps Script.
 // Ela deve ser a mesma URL base usada para as requisições POST/GET.
-const GOOGLE_SHEETS_BASE_URL = 'https://script.google.com/macros/s/AKfycbzSkLIDEJUeJMf8cQestU8jVAaafHPPStvYsnsJMbgoNyEXHkmz4eXica0UOEdUQFea/exec'; // <-- ATUALIZE ESTA LINHA COM A URL REAL DA SUA IMPLANTAÇÃO
+const GOOGLE_SHEETS_BASE_URL = '/api/gas'; // <-- ATUALIZE ESTA LINHA COM A URL REAL DA SUA IMPLANTAÇÃO
 
 const GerenciarUsuarios = () => {
   const [usuarios, setUsuarios] = useState([]);
