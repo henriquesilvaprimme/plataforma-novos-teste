@@ -19,7 +19,7 @@ const CriarLead = () => {
   // MUITO IMPORTANTE: SUBSTITUA ESTE URL PELA URL REAL E ATUALIZADA DA SUA IMPLANTAÇÃO DO GOOGLE APPS SCRIPT
   // CADA NOVA IMPLANTAÇÃO PODE GERAR UMA NOVA URL.
   // Usaremos a mesma base para todas as operações
-  const GOOGLE_SHEETS_BASE_URL = '/api/gas'; // Sua URL de implantação
+  const GOOGLE_SHEETS_BASE_URL = 'https://script.google.com/macros/s/AKfycby8vujvd5ybEpkaZ0kwZecAWOdaL0XJR84oKJBAIR9dVYeTCv7iSdTdHQWBb7YCp349/exec'; // Sua URL de implantação
 
   // Função para buscar os nomes dos responsáveis ao carregar o componente
   useEffect(() => {
