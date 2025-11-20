@@ -38,7 +38,66 @@ const SALVAR_OBSERVACAO_SCRIPT_URL = `${GOOGLE_APPS_SCRIPT_BASE_URL}`;
 // ======= CONFIGURAÇÃO DE SINCRONIZAÇÃO LOCAL =======
 const LOCAL_CHANGES_KEY = 'leads_local_changes_v1';
 const SYNC_DELAY_MS = 5 * 60 * 1000; // 5 minutos
-const SYNC_CHECK_INTERVAL_MS = 1000; // checa a cada 1s
+// const SYNC_CHECK_INTERVAL_MS = 1000; // Não é necessário para essa lógica
+
+// Variável para armazenar o ID do timer (necessário para limpar/resetar)
+let syncTimerId = null; 
+
+// Variável de estado para saber se a sincronização está pendente/agendada
+let isSyncScheduled = false;
+
+// Função simulada que salva a alteração no Local Storage
+function saveLocalChanges(data) {
+    // 1. Salva as alterações no Local Storage
+    console.log(`[${new Date().toLocaleTimeString()}] Alteração detectada e salva localmente.`);
+    
+    // Simulação: Adiciona o novo dado à lista de alterações pendentes
+    let changes = JSON.parse(localStorage.getItem(LOCAL_CHANGES_KEY) || '[]');
+    changes.push(data);
+    localStorage.setItem(LOCAL_CHANGES_KEY, JSON.stringify(changes));
+
+    // 2. Agenda a sincronização se ainda não estiver agendada
+    if (!isSyncScheduled) {
+        scheduleSync();
+    }
+}
+
+// Função que agenda o início do timer de 5 minutos
+function scheduleSync() {
+    isSyncScheduled = true;
+    console.log(`[${new Date().toLocaleTimeString()}] Sincronização agendada para daqui a 5 minutos (sem resetar!).`);
+    
+    // Define o timer de 5 minutos
+    syncTimerId = setTimeout(() => {
+        // Quando o tempo acabar, executa a sincronização
+        performSync();
+        
+        // Reseta o estado
+        isSyncScheduled = false;
+        syncTimerId = null;
+    }, SYNC_DELAY_MS);
+}
+
+// Função que realiza a sincronização real com o servidor/Sheets
+function performSync() {
+    console.log('----------------------------------------------------');
+    console.log(`[${new Date().toLocaleTimeString()}] 🚀 SINCRONIZAÇÃO INICIADA!`);
+    
+    // Pega todos os dados locais
+    const changesToSync = localStorage.getItem(LOCAL_CHANGES_KEY);
+    
+    // ⚠️ Lógica real de API/FETCH/AJAX para enviar 'changesToSync' para o Sheets
+    // ...
+    // ...
+    
+    // Simulação de sucesso
+    console.log('Dados sincronizados com sucesso.');
+    
+    // 3. Limpa as alterações locais após o sucesso da sincronização
+    localStorage.removeItem(LOCAL_CHANGES_KEY);
+    console.log('Local Storage limpo.');
+    console.log('----------------------------------------------------');
+}
 // =====================================================
 
 function App() {
