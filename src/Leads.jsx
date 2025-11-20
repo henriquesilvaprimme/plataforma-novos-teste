@@ -100,7 +100,6 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
         try {
           await fetch(`${GOOGLE_SHEETS_SCRIPT_URL}?action=syncAll`, {
             method: 'POST',
-            mode: 'no-cors',
             headers: {
               'Content-Type': 'application/json',
             },
@@ -247,7 +246,6 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
     try {
       await fetch(ALTERAR_ATRIBUIDO_SCRIPT_URL, {
         method: 'POST',
-        mode: 'no-cors',
         body: JSON.stringify(lead),
         headers: {
           'Content-Type': 'application/json',
@@ -346,7 +344,6 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
 
       await fetch(SALVAR_OBSERVACAO_SCRIPT_URL, {
         method: 'POST',
-        mode: 'no-cors',
         body: JSON.stringify({
           leadId: leadId,
           observacao: observacaoTexto,
