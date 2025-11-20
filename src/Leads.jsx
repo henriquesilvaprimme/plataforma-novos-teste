@@ -7,7 +7,7 @@ const SHEET_NAME = 'Leads';
 // URLs com o parâmetro 'sheet' adicionado para apontar para a nova aba
 const GOOGLE_SHEETS_SCRIPT_BASE_URL = '/api/gas';
 const ALTERAR_ATRIBUIDO_SCRIPT_URL = `${GOOGLE_SHEETS_SCRIPT_BASE_URL}?v=alterar_atribuido&sheet=${SHEET_NAME}`;
-const SALVAR_OBSERVACAO_SCRIPT_URL = `${GOOGLE_SHEETS_SCRIPT_BASE_URL}?action=salvarObservacao&sheet=${SHEET_NAME}`;';
+const SALVAR_OBSERVACAO_SCRIPT_URL = `${GOOGLE_SHEETS_SCRIPT_BASE_URL}?action=salvarObservacao&sheet=${SHEET_NAME}`;'
 
 const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado, fetchLeadsFromSheet, scrollContainerRef, saveLocalChange, forceSyncWithSheets }) => {
   const [selecionados, setSelecionados] = useState({});
