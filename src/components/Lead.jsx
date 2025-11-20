@@ -86,7 +86,6 @@ const Lead = ({ lead, onUpdateStatus, disabledConfirm }) => {
     try {
       await fetch('https://script.google.com/macros/s/AKfycbzSkLIDEJUeJMf8cQestU8jVAaafHPPStvYsnsJMbgoNyEXHkmz4eXica0UOEdUQFea/exec?v=alterar_status', {
         method: 'POST',
-        mode: 'no-cors',
         body: JSON.stringify({
           lead: leadId,
           status: status,
