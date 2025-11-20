@@ -414,7 +414,6 @@ function App() {
     try {
       await fetch(SALVAR_AGENDAMENTO_SCRIPT_URL, {
         method: 'POST',
-        mode: 'no-cors',
         body: JSON.stringify({
           leadId: leadId,
           dataAgendada: dataAgendada,
@@ -488,7 +487,6 @@ function App() {
     try {
       fetch(GOOGLE_APPS_SCRIPT_BASE_URL, {
         method: 'POST',
-        mode: 'no-cors',
         body: JSON.stringify({
           v: 'alterar_seguradora',
           lead: lead
@@ -741,7 +739,6 @@ function App() {
       try {
         await fetch(`${GOOGLE_APPS_SCRIPT_BASE_URL}?action=syncAll`, {
           method: 'POST',
-          mode: 'no-cors',
           headers: {
             'Content-Type': 'application/json',
           },
