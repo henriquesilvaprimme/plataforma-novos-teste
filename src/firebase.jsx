@@ -1,32 +1,19 @@
-// src/firebase.js
+// Importa as funções do SDK
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
-import { getStorage } from "firebase/storage";
-// se quiser analytics:
-// import { getAnalytics } from "firebase/analytics";
 
-// Pegando as variáveis do Vite (import.meta.env)
+// Configuração do Firebase (copie do painel do Firebase)
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID // opcional
+  apiKey: "AIzaSyAMLDTyqFCQhfll1yPMxUtttgjIxCisIP4",
+  authDomain: "painel-de-leads-novos.firebaseapp.com",
+  projectId: "painel-de-leads-novos",
+  storageBucket: "painel-de-leads-novos.firebasestorage.app",
+  messagingSenderId: "630294246900",
+  appId: "1:630294246900:web:764b52308c2ffa805175a1"
 };
 
-if (!firebaseConfig.apiKey) {
-  console.warn("VITE_FIREBASE_API_KEY não definido — verifique variáveis de ambiente");
-}
-
+// Inicializa o app Firebase
 const app = initializeApp(firebaseConfig);
 
-// Exporte os módulos que for usar no app:
-export const auth = getAuth(app);
+// Exporta o banco Firestore
 export const db = getFirestore(app);
-export const storage = getStorage(app);
-// export const analytics = getAnalytics(app);
-
-export default app;
