@@ -69,6 +69,29 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
   carregarLeads();
 }, []);
 
+  return (
+  <div>
+    <h2>Lista de Leads</h2>
+
+    {leads.length === 0 ? (
+      <p>Nenhum lead encontrado.</p>
+    ) : (
+      <ul>
+        {leads.map((lead) => (
+          <li key={lead.id}>
+            <strong>Nome:</strong> {lead.nome} <br />
+            <strong>Email:</strong> {lead.email} <br />
+            <strong>Telefone:</strong> {lead.telefone} <br />
+            <strong>Status:</strong> {lead.status} <br />
+            <hr />
+          </li>
+        ))}
+      </ul>
+    )}
+  </div>
+);
+
+
   // --- LÓGICA DE CONTAGEM INCLUÍDA AQUI ---
   const contagens = useMemo(() => {
     let emContatoCount = 0;
