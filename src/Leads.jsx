@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Lead from './components/Lead';
 import { RefreshCcw, Bell, Search } from 'lucide-react';
+import { useEffect, useState } from "react";
+import { collection, getDocs } from "firebase/firestore";
+import { db } from "../firebase";
+
 
 const SHEET_NAME = 'Leads';
 
@@ -22,6 +26,7 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
   const [filtroStatus, setFiltroStatus] = useState(null);
   const [showNotification, setShowNotification] = useState(false);
   const [hasScheduledToday, setHasScheduledToday] = useState(false);
+  const [leads, setLeads] = useState([]);
 
   useEffect(() => {
     const initialObservacoes = {};
@@ -44,6 +49,25 @@ const Leads = ({ leads, usuarios, onUpdateStatus, transferirLead, usuarioLogado,
       .replace(/\s+/g, ' ')
       .trim();
   };
+
+  useEffect(() => {
+  async function carregarLeads() {
+    try {
+      const querySnapshot = await getDocs(collection(db, "leads"));
+      const lista = [];
+
+      querySnapshot.forEach((doc) => {
+        lista.push({ id: doc.id, ...doc.data() });
+      });
+
+      setLeads(lista);
+    } catch (error) {
+      console.error("Erro ao carregar leads:", error);
+    }
+  }
+
+  carregarLeads();
+}, []);
 
   // --- LÓGICA DE CONTAGEM INCLUÍDA AQUI ---
   const contagens = useMemo(() => {
