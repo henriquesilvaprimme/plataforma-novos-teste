@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
-import { db } from './firebase';
+import { db } from '../firebase';
 import { RefreshCcw } from 'lucide-react'; // Importação do ícone de refresh
 
 const Dashboard = ({ usuarioLogado }) => {
