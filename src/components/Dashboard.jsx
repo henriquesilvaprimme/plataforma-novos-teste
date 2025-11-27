@@ -1,12 +1,26 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebase';
-import { Users, DollarSign, PhoneCall, PhoneOff, Calendar, XCircle, TrendingUp } from 'lucide-react';
+import { db } from './firebase';
+import { RefreshCcw } from 'lucide-react'; // Importação do ícone de refresh
 
 const Dashboard = ({ usuarioLogado }) => {
-  const [leadsData, setLeadsData] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [filtroMesAno, setFiltroMesAno] = useState('');
+  const [leadsData, setLeadsData] = useState([]); // Agora armazena todos os leads do Firebase
+  const [isLoading, setIsLoading] = useState(true); // Estado para o carregamento inicial do dashboard
+  const [isRefreshing, setIsRefreshing] = useState(false); // Estado para o botão de refresh
+
+  // Inicializar dataInicio e dataFim com valores padrão ao carregar o componente
+  const getPrimeiroDiaMes = () => {
+    const hoje = new Date();
+    return new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0, 10);
+  };
+
+  const getDataHoje = () => {
+    return new Date().toISOString().slice(0, 10);
+  };
+
+  const [dataInicio, setDataInicio] = useState(getPrimeiroDiaMes());
+  const [dataFim, setDataFim] = useState(getDataHoje());
+  const [filtroAplicado, setFiltroAplicado] = useState({ inicio: getPrimeiroDiaMes(), fim: getDataHoje() });
 
   // Função auxiliar para normalizar leads (copiada de Leads.jsx)
   const normalizeLead = (docId, data = {}) => {
@@ -34,13 +48,15 @@ const Dashboard = ({ usuarioLogado }) => {
           : data.usuarioId ?? null,
       responsavel: data.responsavel ?? data.Responsavel ?? '',
       createdAt: toISO(data.createdAt ?? data.data ?? data.Data ?? data.criadoEm),
+      Seguradora: data.Seguradora ?? '',
+      PremioLiquido: data.PremioLiquido ?? '',
+      Comissao: data.Comissao ?? '',
       ...data,
     };
   };
 
-  // Listener para leads
+  // Listener para leads do Firebase
   useEffect(() => {
-    setIsLoading(true);
     const leadsColRef = collection(db, 'leads');
     const unsubscribeLeads = onSnapshot(
       leadsColRef,
@@ -49,11 +65,13 @@ const Dashboard = ({ usuarioLogado }) => {
           normalizeLead(doc.id, doc.data())
         );
         setLeadsData(leadsList);
-        setIsLoading(false);
+        setIsLoading(false); // Desativa o loading inicial após carregar os dados
+        setIsRefreshing(false); // Desativa o refresh se estava ativo
       },
       (error) => {
         console.error('Erro ao buscar leads:', error);
         setIsLoading(false);
+        setIsRefreshing(false);
       }
     );
 
@@ -115,27 +133,34 @@ const Dashboard = ({ usuarioLogado }) => {
     return parts.length > 1 ? parts[1] : null;
   };
 
+  // Função auxiliar para validar e formatar a data (mantida da iteração anterior)
+  const getValidDateStr = (dateValue) => {
+    if (!dateValue) return null;
+    try {
+      const dateObj = new Date(dateValue);
+      if (isNaN(dateObj.getTime())) {
+        return null;
+      }
+      return dateObj.toISOString().slice(0, 10);
+    } catch (e) {
+      return null;
+    }
+  };
+
   const filteredLeads = useMemo(() => {
     let filtered = leadsData.filter((lead) => canViewLead(lead));
 
-    if (filtroMesAno) {
-      const [filtroAno, filtroMes] = filtroMesAno.split('-').map(Number);
-      filtered = filtered.filter((lead) => {
-        if (!lead.createdAt) return false;
-        try {
-          const leadDate = new Date(lead.createdAt);
-          return (
-            leadDate.getFullYear() === filtroAno &&
-            leadDate.getMonth() + 1 === filtroMes
-          );
-        } catch (e) {
-          console.error('Erro ao filtrar lead por data:', e);
-          return false;
-        }
-      });
-    }
+    // Aplica o filtro de data de criação
+    filtered = filtered.filter((lead) => {
+      const dataLeadStr = getValidDateStr(lead.createdAt);
+      if (!dataLeadStr) return false;
+      if (filtroAplicado.inicio && dataLeadStr < filtroAplicado.inicio) return false;
+      if (filtroAplicado.fim && dataLeadStr > filtroAplicado.fim) return false;
+      return true;
+    });
+
     return filtered;
-  }, [leadsData, usuarioLogado, filtroMesAno]);
+  }, [leadsData, usuarioLogado, filtroAplicado]);
 
   const dashboardStats = useMemo(() => {
     let totalLeads = 0;
@@ -146,6 +171,19 @@ const Dashboard = ({ usuarioLogado }) => {
     let perdidos = 0;
     const today = new Date().toLocaleDateString('pt-BR');
 
+    // Contadores por seguradora para leads fechados
+    let portoSeguro = 0;
+    let azulSeguros = 0;
+    let itauSeguros = 0;
+    let demaisSeguradoras = 0;
+    let totalPremioLiquido = 0;
+    let somaTotalPercentualComissao = 0;
+    let totalVendasParaMedia = 0;
+
+    const demaisSeguradorasLista = [
+      'tokio', 'yelum', 'suhai', 'allianz', 'bradesco', 'hdi', 'zurich', 'alfa', 'mitsui', 'mapfre', 'demais seguradoras'
+    ];
+
     filteredLeads.forEach((lead) => {
       totalLeads++; // Todos os leads visíveis e filtrados por data
 
@@ -153,6 +191,23 @@ const Dashboard = ({ usuarioLogado }) => {
 
       if (s === 'Fechado') {
         vendas++;
+        // Contagem por seguradora para leads fechados
+        const segNormalized = (lead.Seguradora || '').toString().trim().toLowerCase();
+        if (segNormalized === 'porto seguro') {
+          portoSeguro++;
+        } else if (segNormalized === 'azul seguros') {
+          azulSeguros++;
+        } else if (segNormalized === 'itau seguros') {
+          itauSeguros++;
+        } else if (demaisSeguradorasLista.includes(segNormalized)) {
+          demaisSeguradoras++;
+        }
+
+        // Soma de prêmio líquido e comissão para leads fechados
+        totalPremioLiquido += (Number(lead.PremioLiquido) || 0);
+        somaTotalPercentualComissao += (Number(lead.Comissao) || 0);
+        totalVendasParaMedia++;
+
       } else if (s === 'Em Contato') {
         emContato++;
       } else if (s === 'Sem Contato') {
@@ -174,6 +229,7 @@ const Dashboard = ({ usuarioLogado }) => {
     });
 
     const taxaConversao = totalLeads > 0 ? (vendas / totalLeads) * 100 : 0;
+    const comissaoMediaGlobal = totalVendasParaMedia > 0 ? somaTotalPercentualComissao / totalVendasParaMedia : 0;
 
     return {
       totalLeads,
@@ -183,133 +239,192 @@ const Dashboard = ({ usuarioLogado }) => {
       agendadosHoje,
       perdidos,
       taxaConversao: taxaConversao.toFixed(2),
+      portoSeguro,
+      azulSeguros,
+      itauSeguros,
+      demaisSeguradoras,
+      totalPremioLiquido,
+      comissaoMediaGlobal: comissaoMediaGlobal.toFixed(2),
     };
   }, [filteredLeads]);
 
-  const handleMesAnoChange = (e) => {
-    setFiltroMesAno(e.target.value);
+  const handleAplicarFiltroData = () => {
+    setIsRefreshing(true); // Ativa o loading do botão
+    setFiltroAplicado({ inicio: dataInicio, fim: dataFim });
+    // O useEffect do listener de leads já vai atualizar os dados,
+    // então o isRefreshing será desativado quando os novos dados chegarem.
+  };
+
+  const boxStyle = {
+    padding: '10px',
+    borderRadius: '5px',
+    flex: 1,
+    color: '#fff',
+    textAlign: 'center',
   };
 
   return (
-    <div className="p-4 md:p-6 lg:p-8 relative min-h-screen bg-gray-100 font-sans">
-      {isLoading && (
-        <div className="fixed inset-0 bg-white bg-opacity-80 flex justify-center items-center z-50">
-          <div className="flex items-center">
-            <svg
-              className="animate-spin h-8 w-8 text-indigo-600"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              ></circle>
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
+    <div style={{ padding: '20px' }}>
+      <h1>Dashboard</h1>
+
+      {/* Filtro de datas com botão e o NOVO Botão de Refresh */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          marginBottom: '20px',
+          flexWrap: 'wrap',
+        }}
+      >
+        <input
+          type="date"
+          value={dataInicio}
+          onChange={(e) => setDataInicio(e.target.value)}
+          style={{
+            padding: '6px 10px',
+            borderRadius: '6px',
+            border: '1px solid #ccc',
+            cursor: 'pointer',
+          }}
+          title="Data de Início"
+        />
+        <input
+          type="date"
+          value={dataFim}
+          onChange={(e) => setDataFim(e.target.value)}
+          style={{
+            padding: '6px 10px',
+            borderRadius: '6px',
+            border: '1px solid #ccc',
+            cursor: 'pointer',
+          }}
+          title="Data de Fim"
+        />
+        <button
+          onClick={handleAplicarFiltroData}
+          style={{
+            backgroundColor: '#007bff',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            padding: '6px 14px',
+            cursor: 'pointer',
+          }}
+        >
+          Filtrar
+        </button>
+
+        {/* Botão de Refresh - agora apenas um indicador visual de que os dados estão sendo atualizados */}
+        <button
+          title='Atualizando dados...'
+          disabled={isRefreshing || isLoading} // Desabilita se estiver carregando ou atualizando
+          style={{
+            backgroundColor: '#6c757d', // Cor cinza para o botão de refresh
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            padding: '6px 10px', // Um pouco menor para o ícone
+            cursor: 'default', // Cursor padrão, pois está desabilitado
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minWidth: '36px', // Tamanho mínimo para o ícone
+            height: '36px',
+          }}
+        >
+          {(isRefreshing || isLoading) ? (
+            <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            <p className="ml-4 text-xl font-semibold text-gray-700">
-              Carregando Dashboard...
-            </p>
-          </div>
+          ) : (
+            <RefreshCcw size={20} /> // Ícone de refresh (não clicável, apenas visual)
+          )}
+        </button>
+      </div>
+
+      {/* Spinner de carregamento para o Dashboard geral */}
+      {isLoading && (
+        <div style={{ textAlign: 'center', padding: '20px' }}>
+          <p>Carregando dados do dashboard...</p>
+          {/* Você pode adicionar um spinner aqui se quiser um indicador visual */}
         </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b pb-4 mb-4">
-          <h1 className="text-4xl font-extrabold text-gray-900 flex items-center">
-            <TrendingUp size={32} className="text-indigo-500 mr-3" />
-            Dashboard
-          </h1>
-          <div className="flex items-center gap-2">
-            <label htmlFor="filtroMesAno" className="text-sm font-medium text-gray-700">
-              Filtrar por Mês/Ano:
-            </label>
-            <input
-              type="month"
-              id="filtroMesAno"
-              value={filtroMesAno}
-              onChange={handleMesAnoChange}
-              className="p-2 border border-gray-300 rounded-lg cursor-pointer text-sm"
-              title="Filtrar dados por mês e ano de criação do lead"
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {/* Card: Total de Leads */}
-          <div className="bg-indigo-500 text-white rounded-lg p-5 shadow-md flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium opacity-80">Total de Leads</p>
-              <p className="text-3xl font-bold">{dashboardStats.totalLeads}</p>
+      {!isLoading && ( // Renderiza o conteúdo apenas quando não estiver carregando
+        <>
+          {/* Primeira linha de contadores */}
+          <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
+            <div style={{ ...boxStyle, backgroundColor: '#eee', color: '#333' }}>
+              <h3>Total de Leads</h3>
+              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.totalLeads}</p>
             </div>
-            <Users size={36} />
-          </div>
-
-          {/* Card: Vendas */}
-          <div className="bg-green-500 text-white rounded-lg p-5 shadow-md flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium opacity-80">Vendas</p>
-              <p className="text-3xl font-bold">{dashboardStats.vendas}</p>
+            <div style={{ ...boxStyle, backgroundColor: '#9C27B0' }}>
+              <h3>Taxa de Conversão</h3>
+              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.taxaConversao}%</p>
             </div>
-            <DollarSign size={36} />
-          </div>
-
-          {/* Card: Taxa de Conversão */}
-          <div className="bg-purple-500 text-white rounded-lg p-5 shadow-md flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium opacity-80">Taxa de Conversão</p>
-              <p className="text-3xl font-bold">{dashboardStats.taxaConversao}%</p>
+            <div style={{ ...boxStyle, backgroundColor: '#4CAF50' }}>
+              <h3>Vendas</h3>
+              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.vendas}</p>
             </div>
-            <TrendingUp size={36} />
-          </div>
-
-          {/* Card: Em Contato */}
-          <div className="bg-orange-500 text-white rounded-lg p-5 shadow-md flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium opacity-80">Em Contato</p>
-              <p className="text-3xl font-bold">{dashboardStats.emContato}</p>
+            <div style={{ ...boxStyle, backgroundColor: '#F44336' }}>
+              <h3>Leads Perdidos</h3>
+              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.perdidos}</p>
             </div>
-            <PhoneCall size={36} />
-          </div>
-
-          {/* Card: Sem Contato */}
-          <div className="bg-gray-700 text-white rounded-lg p-5 shadow-md flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium opacity-80">Sem Contato</p>
-              <p className="text-3xl font-bold">{dashboardStats.semContato}</p>
+            <div style={{ ...boxStyle, backgroundColor: '#FF9800' }}>
+              <h3>Em Contato</h3>
+              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.emContato}</p>
             </div>
-            <PhoneOff size={36} />
-          </div>
-
-          {/* Card: Agendados Hoje */}
-          <div className="bg-blue-500 text-white rounded-lg p-5 shadow-md flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium opacity-80">Agendados Hoje</p>
-              <p className="text-3xl font-bold">{dashboardStats.agendadosHoje}</p>
+            <div style={{ ...boxStyle, backgroundColor: '#9E9E9E' }}>
+              <h3>Sem Contato</h3>
+              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.semContato}</p>
             </div>
-            <Calendar size={36} />
           </div>
 
-          {/* Card: Perdidos */}
-          <div className="bg-red-500 text-white rounded-lg p-5 shadow-md flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium opacity-80">Perdidos</p>
-              <p className="text-3xl font-bold">{dashboardStats.perdidos}</p>
+          {/* Segunda linha de contadores */}
+          <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
+            <div style={{ ...boxStyle, backgroundColor: '#003366' }}>
+              <h3>Porto Seguro</h3>
+              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.portoSeguro}</p>
             </div>
-            <XCircle size={36} />
+            <div style={{ ...boxStyle, backgroundColor: '#87CEFA' }}>
+              <h3>Azul Seguros</h3>
+              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.azulSeguros}</p>
+            </div>
+            <div style={{ ...boxStyle, backgroundColor: '#FF8C00' }}>
+              <h3>Itau Seguros</h3>
+              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.itauSeguros}</p>
+            </div>
+            <div style={{ ...boxStyle, backgroundColor: '#4CAF50' }}>
+              <h3>Demais Seguradoras</h3>
+              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.demaisSeguradoras}</p>
+            </div>
           </div>
-        </div>
-      </div>
 
-      {/* Aqui você pode adicionar mais seções do dashboard, como gráficos, tabelas, etc. */}
+          {/* Somente para Admin: linha de Prêmio Líquido e Comissão */}
+          {isAdmin && (
+            <div style={{ display: 'flex', gap: '20px', marginTop: '20px' }}>
+              <div style={{ ...boxStyle, backgroundColor: '#3f51b5' }}>
+                <h3>Total Prêmio Líquido</h3>
+                <p style={{ fontSize: '24px', fontWeight: 'bold' }}>
+                  {dashboardStats.totalPremioLiquido.toLocaleString('pt-BR', {
+                    style: 'currency',
+                    currency: 'BRL',
+                  })}
+                </p>
+              </div>
+                
+              <div style={{ ...boxStyle, backgroundColor: '#009688' }}>
+                <h3>Média Comissão</h3>
+                <p style={{ fontSize: '24px', fontWeight: 'bold' }}>
+                  {dashboardStats.comissaoMediaGlobal.replace('.', ',')}%
+                </p>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 };
