@@ -104,7 +104,7 @@ function App() {
   };
 
   // Normaliza um objeto de lead vindo do sheet/local para garantir campos básicos,
-  // e extrai possíveis variações de Document ID (ex.: 'Document ID', 'documentId', 'docId', 'DocumentID', etc.)
+  // detectando automaticamente variações do campo Document ID (ignora maiúsc/minúsc e espaços)
   const normalizeLead = (item = {}) => {
     // tenta extrair id seguro
     const rawId = item.id ?? item.ID ?? item.Id ?? item.IdLead ?? null;
@@ -112,9 +112,34 @@ function App() {
       ? String(rawId)
       : (item.phone ? String(item.phone) : (crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)));
 
-    // document id possible keys
-    const rawDocumentId = item.documentId ?? item.docId ?? item.DocumentId ?? item.DocumentID ?? item['Document ID'] ?? item['DocumentId'] ?? item.documentID ?? null;
-    const documentId = rawDocumentId !== null && rawDocumentId !== undefined && rawDocumentId !== '' ? String(rawDocumentId) : null;
+    // Detectar qualquer chave que contenha 'document' e 'id' (ex.: 'Document ID', 'documentId', 'DocumentID', etc.)
+    let rawDocumentId = null;
+    Object.keys(item || {}).forEach((k) => {
+      const cleaned = String(k).toLowerCase().replace(/\s+/g, '');
+      if (cleaned.includes('document') && cleaned.includes('id')) {
+        const v = item[k];
+        if (v !== undefined && v !== null && String(v).trim() !== '') {
+          rawDocumentId = String(v);
+        }
+      }
+      // detecta chaves curtas como 'docid' ou 'docId'
+      if (!rawDocumentId) {
+        const ck = String(k).toLowerCase();
+        if (ck === 'docid' || ck === 'docid' || ck === 'doc_id' || ck === 'documentid') {
+          const v = item[k];
+          if (v !== undefined && v !== null && String(v).trim() !== '') {
+            rawDocumentId = String(v);
+          }
+        }
+      }
+    });
+
+    // fallback para propriedades específicas
+    if (!rawDocumentId) {
+      rawDocumentId = item.documentId ?? item.docId ?? item.DocumentId ?? item.DocumentID ?? item['Document ID'] ?? null;
+    }
+
+    const documentId = rawDocumentId !== null && rawDocumentId !== undefined && String(rawDocumentId).trim() !== '' ? String(rawDocumentId).trim() : null;
 
     const statusRaw = item.status ?? item.Status ?? item.stato ?? '';
     const status = (typeof statusRaw === 'string' && statusRaw.trim() !== '') ? statusRaw : (item.confirmado ? 'Em Contato' : 'Selecione o status');
@@ -124,8 +149,8 @@ function App() {
       id: String(item.id ?? item.ID ?? derivedId),
       ID: String(item.ID ?? item.id ?? derivedId),
       documentId: documentId, // novo campo consistente para Document ID
-      // também mantém a chave original caso exista (muitos objetos podem ter "Document ID" literais)
-      'Document ID': item['Document ID'] ?? rawDocumentId ?? undefined,
+      // mantém 'Document ID' bruto se existir (algumas planilhas têm a coluna literal)
+      'Document ID': item['Document ID'] ?? (documentId ? documentId : undefined),
       name: item.name ?? item.Name ?? item.nome ?? '',
       nome: item.nome ?? item.name ?? item.Name ?? '',
       vehicleModel: item.vehicleModel ?? item.vehiclemodel ?? item.vehicle_model ?? item.Modelo ?? item.modelo ?? '',
@@ -156,23 +181,26 @@ function App() {
     };
   };
 
-  // util: compara um lead com um identificador (aceita id, ID, phone ou documentId)
+  // util: normalize string for comparisons
+  const norm = (v) => (v === undefined || v === null) ? '' : String(v).trim();
+
+  // util: compara um lead com um identificador (aceita id, ID, phone ou documentId), com trim
   const leadMatchesIdent = (lead, ident) => {
     if (!ident || !lead) return false;
-    const s = String(ident);
+    const s = norm(ident);
     return (
-      String(lead.id) === s ||
-      String(lead.ID) === s ||
-      String(lead.phone ?? '') === s ||
-      String(lead.documentId ?? '') === s ||
-      String(lead['Document ID'] ?? '') === s
+      norm(lead.id) === s ||
+      norm(lead.ID) === s ||
+      norm(lead.phone) === s ||
+      norm(lead.documentId) === s ||
+      norm(lead['Document ID']) === s
     );
   };
 
   // Aplica uma alteração no estado local imediatamente (optimistic)
   const applyChangeToLocalState = (change) => {
     try {
-      const leadId = change.leadId || change.data?.leadId || change.data?.id || change.data?.ID || change.id;
+      const leadId = change.leadId || change.data?.leadId || change.data?.id || change.data?.ID || change.data?.documentId || change.id;
       const type = change.type;
       const data = change.data || {};
 
@@ -183,7 +211,7 @@ function App() {
         if (!prev || prev.length === 0) return prev;
         const updated = prev.map(l => {
           // tentar casar por id numérico ou string ou phone ou documentId
-          if (String(l.id) === String(leadId) || String(l.ID) === String(leadId) || String(data.phone || '') === String(l.phone || '') || String(l.documentId ?? '') === String(leadId)) {
+          if (leadMatchesIdent(l, leadId) || (data.phone && norm(data.phone) === norm(l.phone))) {
             let copy = { ...l };
             if (type === 'alterarAtribuido') {
               if (data.usuarioId !== undefined) {
@@ -217,13 +245,7 @@ function App() {
         setLeadsFechados(prev => {
           if (!prev || prev.length === 0) return prev;
           const updated = prev.map(lf => {
-            if (
-              String(lf.ID) === String(leadId) ||
-              String(lf.id) === String(leadId) ||
-              String(lf.phone ?? '') === String(leadId) ||
-              String(lf.documentId ?? '') === String(leadId) ||
-              String(lf['Document ID'] ?? '') === String(leadId)
-            ) {
+            if (leadMatchesIdent(lf, leadId) || (data.phone && norm(data.phone) === norm(lf.phone))) {
               return { ...lf, ...data };
             }
             return lf;
@@ -345,23 +367,19 @@ function App() {
 
         // considerar documentId nas comparações
         const leadIdMatches = (
-          (ch.leadId && String(ch.leadId) === String(lead.id)) ||
-          (ch.leadId && String(ch.leadId) === String(lead.ID)) ||
-          (ch.leadId && String(ch.leadId) === String(lead.documentId)) ||
-          (ch.id && String(ch.id) === String(lead.id)) ||
-          (ch.id && String(ch.id) === String(lead.ID)) ||
-          (ch.id && String(ch.id) === String(lead.documentId)) ||
+          (ch.leadId && (norm(ch.leadId) === norm(lead.id) || norm(ch.leadId) === norm(lead.ID) || norm(ch.leadId) === norm(lead.documentId))) ||
+          (ch.id && (norm(ch.id) === norm(lead.id) || norm(ch.id) === norm(lead.ID) || norm(ch.id) === norm(lead.documentId))) ||
           (ch.data && (
-            String(ch.data.id) === String(lead.id) ||
-            String(ch.data.ID) === String(lead.id) ||
-            String(ch.data.leadId) === String(lead.id) ||
-            String(ch.data.id) === String(lead.documentId) ||
-            String(ch.data.ID) === String(lead.documentId) ||
-            String(ch.data.leadId) === String(lead.documentId)
+            norm(ch.data.id) === norm(lead.id) ||
+            norm(ch.data.ID) === norm(lead.id) ||
+            norm(ch.data.leadId) === norm(lead.id) ||
+            norm(ch.data.id) === norm(lead.documentId) ||
+            norm(ch.data.ID) === norm(lead.documentId) ||
+            norm(ch.data.leadId) === norm(lead.documentId)
           ))
         );
 
-        const phoneMatches = ch.data && ch.data.phone && String(ch.data.phone) === String(lead.phone);
+        const phoneMatches = ch.data && ch.data.phone && norm(ch.data.phone) === norm(lead.phone);
 
         return (leadIdMatches || phoneMatches);
       });
@@ -386,9 +404,9 @@ function App() {
       if (!change) return;
       if (Date.now() - change.timestamp < SYNC_DELAY_MS) {
         const exists = merged.some(l =>
-          String(l.id) === String(change.leadId) ||
-          (change.data && String(l.phone) === String(change.data.phone)) ||
-          String(l.documentId ?? '') === String(change.leadId ?? change.data?.documentId ?? '')
+          norm(l.id) === norm(change.leadId) ||
+          (change.data && norm(l.phone) === norm(change.data.phone)) ||
+          norm(l.documentId ?? '') === norm(change.leadId ?? change.data?.documentId ?? '')
         );
         if (!exists) {
           const newLead = normalizeLead({ id: change.leadId || change.id, documentId: change.data?.documentId ?? change.leadId, ...(change.data || {}) });
@@ -498,7 +516,7 @@ function App() {
   const adicionarNovoLead = (novoLead) => {
     const normalized = normalizeLead(novoLead);
     setLeads((prevLeads) => {
-      if (!prevLeads.some(lead => String(lead.ID) === String(normalized.ID) || String(lead.id) === String(normalized.id) || String(lead.documentId ?? '') === String(normalized.documentId ?? ''))) {
+      if (!prevLeads.some(lead => norm(lead.ID) === norm(normalized.ID) || norm(lead.id) === norm(normalized.id) || norm(lead.documentId ?? '') === norm(normalized.documentId ?? ''))) {
         return [normalized, ...prevLeads];
       }
       return prevLeads;
@@ -624,9 +642,22 @@ function App() {
     VigenciaInicial: "",
   })
 
-  // FUNÇÃO ATUALIZADA COM SUPORTE A Document ID (doc.id do Firestore)
+  // FUNÇÃO ATUALIZADA COM SUPORTE A Document ID (doc.id do Firestore) E LOGS PARA DEBUG
   const confirmarSeguradoraLead = (id, premio, seguradora, comissao, parcelamento, vigenciaFinal, vigenciaInicial, meioPagamento, cartaoPortoNovo) => {
     const ident = String(id);
+
+    // LOG TEMPORÁRIO: para debug (mostra ident recebido e lista reduzida de ids em leadsFechados)
+    try {
+      console.debug('[confirmarSeguradoraLead] ident recebido:', ident);
+      console.debug('[confirmarSeguradoraLead] leadsFechados snapshot (ID,id,documentId):', leadsFechados.map(l => ({
+        ID: norm(l.ID),
+        id: norm(l.id),
+        documentId: norm(l.documentId),
+        'Document ID': norm(l['Document ID'])
+      })));
+    } catch (e) {
+      // ignore
+    }
 
     // Procura pelo lead usando ID, id, phone ou documentId (tolerante)
     const found = leadsFechados.find(l => leadMatchesIdent(l, ident));
@@ -681,6 +712,7 @@ function App() {
           insurerConfirmed: true
         });
         updated = [...updated, placeholder];
+        console.debug('[confirmarSeguradoraLead] placeholder criado para ident:', ident);
       }
 
       return updated;
