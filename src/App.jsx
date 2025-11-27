@@ -103,13 +103,18 @@ function App() {
     return result;
   };
 
-  // Normaliza um objeto de lead vindo do sheet/local para garantir campos básicos
+  // Normaliza um objeto de lead vindo do sheet/local para garantir campos básicos,
+  // e extrai possíveis variações de Document ID (ex.: 'Document ID', 'documentId', 'docId', 'DocumentID', etc.)
   const normalizeLead = (item = {}) => {
     // tenta extrair id seguro
     const rawId = item.id ?? item.ID ?? item.Id ?? item.IdLead ?? null;
     const derivedId = rawId !== null && rawId !== undefined && rawId !== ''
       ? String(rawId)
       : (item.phone ? String(item.phone) : (crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)));
+
+    // document id possible keys
+    const rawDocumentId = item.documentId ?? item.docId ?? item.DocumentId ?? item.DocumentID ?? item['Document ID'] ?? item['DocumentId'] ?? item.documentID ?? null;
+    const documentId = rawDocumentId !== null && rawDocumentId !== undefined && rawDocumentId !== '' ? String(rawDocumentId) : null;
 
     const statusRaw = item.status ?? item.Status ?? item.stato ?? '';
     const status = (typeof statusRaw === 'string' && statusRaw.trim() !== '') ? statusRaw : (item.confirmado ? 'Em Contato' : 'Selecione o status');
@@ -118,6 +123,9 @@ function App() {
     return {
       id: String(item.id ?? item.ID ?? derivedId),
       ID: String(item.ID ?? item.id ?? derivedId),
+      documentId: documentId, // novo campo consistente para Document ID
+      // também mantém a chave original caso exista (muitos objetos podem ter "Document ID" literais)
+      'Document ID': item['Document ID'] ?? rawDocumentId ?? undefined,
       name: item.name ?? item.Name ?? item.nome ?? '',
       nome: item.nome ?? item.name ?? item.Name ?? '',
       vehicleModel: item.vehicleModel ?? item.vehiclemodel ?? item.vehicle_model ?? item.Modelo ?? item.modelo ?? '',
@@ -134,7 +142,7 @@ function App() {
       comissao: item.comissao ?? item.Comissao ?? '',
       parcelamento: item.parcelamento ?? item.Parcelamento ?? '',
       VigenciaFinal: item.VigenciaFinal ?? item.vigenciaFinal ?? '',
-      VigenciaInicial: item.VigenciaInicial ?? item.vigenciaInicial ?? '',
+      VigenciaInicial: item.VigenciaInicial ?? item.vigenciaFinal ?? '',
       createdAt: item.createdAt ?? item.data ?? item.Data ?? new Date().toISOString(),
       responsavel: item.responsavel ?? item.Responsavel ?? '',
       editado: item.editado ?? '',
@@ -146,6 +154,19 @@ function App() {
       // preserva quaisquer outros campos
       ...item,
     };
+  };
+
+  // util: compara um lead com um identificador (aceita id, ID, phone ou documentId)
+  const leadMatchesIdent = (lead, ident) => {
+    if (!ident || !lead) return false;
+    const s = String(ident);
+    return (
+      String(lead.id) === s ||
+      String(lead.ID) === s ||
+      String(lead.phone ?? '') === s ||
+      String(lead.documentId ?? '') === s ||
+      String(lead['Document ID'] ?? '') === s
+    );
   };
 
   // Aplica uma alteração no estado local imediatamente (optimistic)
@@ -161,8 +182,8 @@ function App() {
       setLeads(prev => {
         if (!prev || prev.length === 0) return prev;
         const updated = prev.map(l => {
-          // tentar casar por id numérico ou string ou phone
-          if (String(l.id) === String(leadId) || String(l.ID) === String(leadId) || String(data.phone || '') === String(l.phone || '')) {
+          // tentar casar por id numérico ou string ou phone ou documentId
+          if (String(l.id) === String(leadId) || String(l.ID) === String(leadId) || String(data.phone || '') === String(l.phone || '') || String(l.documentId ?? '') === String(leadId)) {
             let copy = { ...l };
             if (type === 'alterarAtribuido') {
               if (data.usuarioId !== undefined) {
@@ -180,6 +201,9 @@ function App() {
               copy.confirmado = true;
             } else if (type === 'salvarAgendamento') {
               copy.agendamento = data.dataAgendada ?? copy.agendamento;
+            } else if (type === 'alterar_seguradora') {
+              // manter consistência dos campos
+              copy = { ...copy, ...data };
             }
             return copy;
           }
@@ -193,7 +217,13 @@ function App() {
         setLeadsFechados(prev => {
           if (!prev || prev.length === 0) return prev;
           const updated = prev.map(lf => {
-            if (String(lf.ID) === String(leadId) || String(lf.id) === String(leadId)) {
+            if (
+              String(lf.ID) === String(leadId) ||
+              String(lf.id) === String(leadId) ||
+              String(lf.phone ?? '') === String(leadId) ||
+              String(lf.documentId ?? '') === String(leadId) ||
+              String(lf['Document ID'] ?? '') === String(leadId)
+            ) {
               return { ...lf, ...data };
             }
             return lf;
@@ -209,7 +239,7 @@ function App() {
   // Save a local change (used by child components, optimistic update already handled there)
   const saveLocalChange = (change) => {
     try {
-      const derivedLeadId = change.id ?? change.data?.id ?? change.data?.ID ?? change.data?.leadId ?? change.data?.phone ?? null;
+      const derivedLeadId = change.id ?? change.data?.id ?? change.data?.ID ?? change.data?.leadId ?? change.data?.phone ?? change.data?.documentId ?? null;
       const keyBase = derivedLeadId ? String(derivedLeadId) : (crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
       const key = keyBase;
       const timestamp = Date.now();
@@ -313,10 +343,23 @@ function App() {
         const ch = localChangesRef.current[k];
         if (!ch) return false;
 
-        const leadIdMatches = (ch.leadId && String(ch.leadId) === String(lead.id)) ||
-                              (ch.leadId && String(ch.leadId) === String(lead.ID)) ||
-                              (ch.id && String(ch.id) === String(lead.id)) ||
-                              (ch.data && (String(ch.data.id) === String(lead.id) || String(ch.data.ID) === String(lead.id) || String(ch.data.leadId) === String(lead.id)));
+        // considerar documentId nas comparações
+        const leadIdMatches = (
+          (ch.leadId && String(ch.leadId) === String(lead.id)) ||
+          (ch.leadId && String(ch.leadId) === String(lead.ID)) ||
+          (ch.leadId && String(ch.leadId) === String(lead.documentId)) ||
+          (ch.id && String(ch.id) === String(lead.id)) ||
+          (ch.id && String(ch.id) === String(lead.ID)) ||
+          (ch.id && String(ch.id) === String(lead.documentId)) ||
+          (ch.data && (
+            String(ch.data.id) === String(lead.id) ||
+            String(ch.data.ID) === String(lead.id) ||
+            String(ch.data.leadId) === String(lead.id) ||
+            String(ch.data.id) === String(lead.documentId) ||
+            String(ch.data.ID) === String(lead.documentId) ||
+            String(ch.data.leadId) === String(lead.documentId)
+          ))
+        );
 
         const phoneMatches = ch.data && ch.data.phone && String(ch.data.phone) === String(lead.phone);
 
@@ -342,9 +385,13 @@ function App() {
       const change = localChangesRef.current[k];
       if (!change) return;
       if (Date.now() - change.timestamp < SYNC_DELAY_MS) {
-        const exists = merged.some(l => String(l.id) === String(change.leadId) || (change.data && String(l.phone) === String(change.data.phone)));
+        const exists = merged.some(l =>
+          String(l.id) === String(change.leadId) ||
+          (change.data && String(l.phone) === String(change.data.phone)) ||
+          String(l.documentId ?? '') === String(change.leadId ?? change.data?.documentId ?? '')
+        );
         if (!exists) {
-          const newLead = normalizeLead({ id: change.leadId || change.id, ...(change.data || {}) });
+          const newLead = normalizeLead({ id: change.leadId || change.id, documentId: change.data?.documentId ?? change.leadId, ...(change.data || {}) });
           merged.unshift(newLead);
         }
       }
@@ -403,7 +450,7 @@ function App() {
         return;
       }
 
-      // normaliza e garante id/ID como strings
+      // normaliza e garante id/ID/documentId como strings
       const formattedData = data.map(item => normalizeLead(item));
       setLeadsFechados(formattedData);
 
@@ -430,7 +477,7 @@ function App() {
   const handleLeadFechadoNameUpdate = (leadId, novoNome) => {
     setLeadsFechados(prevLeads => {
       const updatedLeads = prevLeads.map(lead => {
-        if (String(lead.ID) === String(leadId) || String(lead.id) === String(leadId)) {
+        if (leadMatchesIdent(lead, leadId)) {
           return {
             ...lead,
             name: novoNome,
@@ -451,7 +498,7 @@ function App() {
   const adicionarNovoLead = (novoLead) => {
     const normalized = normalizeLead(novoLead);
     setLeads((prevLeads) => {
-      if (!prevLeads.some(lead => String(lead.ID) === String(normalized.ID) || String(lead.id) === String(normalized.id))) {
+      if (!prevLeads.some(lead => String(lead.ID) === String(normalized.ID) || String(lead.id) === String(normalized.id) || String(lead.documentId ?? '') === String(normalized.documentId ?? ''))) {
         return [normalized, ...prevLeads];
       }
       return prevLeads;
@@ -503,11 +550,12 @@ function App() {
           const leadParaAdicionar = leads.find((lead) => lead.phone === phone);
 
           if (leadParaAdicionar) {
-            const newId = String(leadParaAdicionar.id ?? leadParaAdicionar.ID ?? (crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)));
+            const newId = String(leadParaAdicionar.id ?? leadParaAdicionar.ID ?? leadParaAdicionar.documentId ?? (crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)));
 
             const novoLeadFechado = {
               ID: newId,
               id: newId,
+              documentId: leadParaAdicionar.documentId ?? null,
               name: leadParaAdicionar.name,
               vehicleModel: leadParaAdicionar.vehicleModel,
               vehicleYearModel: leadParaAdicionar.vehicleYearModel,
@@ -576,24 +624,22 @@ function App() {
     VigenciaInicial: "",
   })
 
-  // FUNÇÃO ATUALIZADA COM NOVOS PARÂMETROS E FALLBACK PARA DOC.ID DO FIRESTORE
+  // FUNÇÃO ATUALIZADA COM SUPORTE A Document ID (doc.id do Firestore)
   const confirmarSeguradoraLead = (id, premio, seguradora, comissao, parcelamento, vigenciaFinal, vigenciaInicial, meioPagamento, cartaoPortoNovo) => {
     const ident = String(id);
 
-    // Procura pelo lead usando ID, id ou phone (tolerante)
-    const found = leadsFechados.find(l =>
-      String(l.ID) === ident || String(l.id) === ident || String(l.phone) === ident
-    );
+    // Procura pelo lead usando ID, id, phone ou documentId (tolerante)
+    const found = leadsFechados.find(l => leadMatchesIdent(l, ident));
 
     if (!found) {
-      console.warn(`Aviso: Lead com identificador ${ident} não encontrado por ID/id/phone. Tentando criar/atualizar placeholder em leadsFechados usando o identificador recebido.`);
+      console.warn(`Aviso: Lead com identificador ${ident} não encontrado por ID/id/phone/documentId. Irei criar um placeholder em leadsFechados.`);
     }
 
     // Atualiza estado localmente sempre que possível (mapeia por várias chaves)
     setLeadsFechados((prev) => {
       // Se já existe, atualiza
       let updated = prev.map((l) => {
-        if (String(l.ID) === ident || String(l.id) === ident || String(l.phone) === ident) {
+        if (leadMatchesIdent(l, ident)) {
           return {
             ...l,
             insurerConfirmed: true,
@@ -611,11 +657,13 @@ function App() {
       });
 
       // Se não encontrou, adiciona um placeholder (upsert) para compatibilidade com doc.id do Firestore
-      const existsNow = updated.some(l => String(l.ID) === ident || String(l.id) === ident || String(l.phone) === ident);
+      const existsNow = updated.some(l => leadMatchesIdent(l, ident));
       if (!existsNow) {
         const placeholder = normalizeLead({
           ID: ident,
           id: ident,
+          documentId: ident,
+          'Document ID': ident,
           name: '',
           phone: '',
           Data: new Date().toISOString(),
@@ -644,6 +692,7 @@ function App() {
       const dataToSave = {
         id: changeId,
         ID: changeId,
+        documentId: changeId,
         Seguradora: seguradora,
         PremioLiquido: premio,
         Comissao: comissao,
@@ -666,7 +715,7 @@ function App() {
   const atualizarDetalhesLeadFechado = (id, campo, valor) => {
     setLeadsFechados((prev) =>
       prev.map((lead) =>
-        (String(lead.ID) === String(id) || String(lead.id) === String(id)) ? { ...lead, [campo]: valor } : lead
+        leadMatchesIdent(lead, id) ? { ...lead, [campo]: valor } : lead
       )
     );
   };
