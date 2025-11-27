@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Lead from './components/Lead';
 import { RefreshCcw, Bell, Search } from 'lucide-react';
-import { collection, getDocs, doc, updateDoc, deleteField } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db } from './firebase'; // ajuste o caminho se necessário
 
 const Leads = ({
@@ -42,8 +42,16 @@ const Leads = ({
 
       // Opcional: ordenar por createdAt (se existir)
       lista.sort((a, b) => {
-        const da = a.createdAt ? new Date(a.createdAt) : new Date(0);
-        const dbb = b.createdAt ? new Date(b.createdAt) : new Date(0);
+        const toDate = (v) => {
+          if (!v) return new Date(0);
+          // Firestore Timestamp tem toDate()
+          if (typeof v === 'object' && typeof v.toDate === 'function') {
+            return v.toDate();
+          }
+          return new Date(v);
+        };
+        const da = toDate(a.createdAt);
+        const dbb = toDate(b.createdAt);
         return dbb - da;
       });
 
@@ -84,6 +92,18 @@ const Leads = ({
       .trim();
   };
 
+  // helper: checa se status é string e começa com 'Agendado'
+  const isStatusAgendado = (status) => {
+    return typeof status === 'string' && status.startsWith('Agendado');
+  };
+
+  // helper: extrai data dd/mm/yyyy do campo status (ex: "Agendado - 25/12/2025")
+  const extractStatusDate = (status) => {
+    if (typeof status !== 'string') return null;
+    const parts = status.split(' - ');
+    return parts.length > 1 ? parts[1] : null;
+  };
+
   // --- LÓGICA DE CONTAGEM ---
   const contagens = useMemo(() => {
     let emContatoCount = 0;
@@ -102,8 +122,8 @@ const Leads = ({
         emContatoCount++;
       } else if (lead.status === 'Sem Contato') {
         semContatoCount++;
-      } else if (lead.status?.startsWith('Agendado')) {
-        const statusDateStr = lead.status?.split(' - ')[1];
+      } else if (isStatusAgendado(lead.status)) {
+        const statusDateStr = extractStatusDate(lead.status);
         if (statusDateStr) {
           const [dia, mes, ano] = statusDateStr.split('/');
           const statusDateFormatted = new Date(`${ano}-${mes}-${dia}T00:00:00`).toLocaleDateString('pt-BR');
@@ -190,23 +210,23 @@ const Leads = ({
       if (filtroStatus === 'Agendado') {
         const today = new Date();
         const todayFormatted = today.toLocaleDateString('pt-BR');
-        const statusDateStr = lead.status?.split(' - ')[1];
+        const statusDateStr = extractStatusDate(lead.status);
         if (!statusDateStr) return false;
         const [dia, mes, ano] = statusDateStr.split('/');
         const statusDate = new Date(`${ano}-${mes}-${dia}T00:00:00`);
         const statusDateFormatted = statusDate.toLocaleDateString('pt-BR');
-        return lead.status?.startsWith('Agendado') && statusDateFormatted === todayFormatted;
+        return isStatusAgendado(lead.status) && statusDateFormatted === todayFormatted;
       }
       return lead.status === filtroStatus;
     }
 
     if (filtroData) {
-      const leadMesAno = lead.createdAt ? lead.createdAt.substring(0, 7) : '';
+      const leadMesAno = lead.createdAt ? (typeof lead.createdAt === 'object' && typeof lead.createdAt.toDate === 'function' ? lead.createdAt.toDate().toISOString().substring(0,7) : (String(lead.createdAt).substring(0,7))) : '';
       return leadMesAno === filtroData;
     }
 
     if (filtroNome) {
-      return nomeContemFiltro(lead.name, filtroNome);
+      return nomeContemFiltro(lead.name || lead.nome, filtroNome);
     }
 
     return true;
@@ -324,11 +344,15 @@ const Leads = ({
 
   const formatarData = (dataStr) => {
     if (!dataStr) return '';
+    // Trata Timestamp do Firestore
+    if (typeof dataStr === 'object' && typeof dataStr.toDate === 'function') {
+      return dataStr.toDate().toLocaleDateString('pt-BR');
+    }
     let data;
-    if (dataStr.includes('/')) {
+    if (typeof dataStr === 'string' && dataStr.includes('/')) {
       const partes = dataStr.split('/');
       data = new Date(parseInt(partes[2]), parseInt(partes[1]) - 1, parseInt(partes[0]));
-    } else if (dataStr.includes('-') && dataStr.length === 10) {
+    } else if (typeof dataStr === 'string' && dataStr.includes('-') && dataStr.length === 10) {
       const partes = dataStr.split('-');
       data = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, parseInt(partes[2]));
     } else {
@@ -403,9 +427,9 @@ const Leads = ({
       });
     }
 
-    // Primeiro notifica o parent para lógica de UI/estado global
+    // Primeiro notifica o parent para lógica de UI/estado global (se existir)
     try {
-      onUpdateStatus(leadId, novoStatus, phoneOrDate);
+      onUpdateStatus && onUpdateStatus(leadId, novoStatus, phoneOrDate);
     } catch (err) {
       // não falhar se parent não estiver presente
       console.warn('onUpdateStatus disparado, mas houve erro/ausência:', err);
@@ -427,18 +451,16 @@ const Leads = ({
           agendamento = phoneOrDate;
           finalStatus = `Agendado - ${agendamento}`;
         } else {
-          // Se não vier data, marcamos apenas como 'Agendado' (sem data)
+          // Se não vier data, marcamos apenas como 'Agendado'
           finalStatus = 'Agendado';
           agendamento = null;
         }
-      } else if (novoStatus?.startsWith('Agendado')) {
-        // Se já vem com a data em novoStatus (ex: 'Agendado - 25/12/2025')
-        const possibleDate = novoStatus.split(' - ')[1];
+      } else if (typeof novoStatus === 'string' && novoStatus.startsWith('Agendado')) {
+        const possibleDate = extractStatusDate(novoStatus);
         if (isValidDDMMYYYY(possibleDate)) {
           agendamento = possibleDate;
           finalStatus = novoStatus;
         } else {
-          // Se não houver data válida, mantemos o texto como veio e sem agendamento
           finalStatus = novoStatus;
           agendamento = null;
         }
@@ -467,7 +489,7 @@ const Leads = ({
       if (agendamento) {
         dataToUpdate.agendamento = agendamento;
       } else {
-        // Se já existia um campo agendamento e agora não há, limpamos para null
+        // se quiser limpar o campo quando não há agendamento, define null
         dataToUpdate.agendamento = null;
       }
 
@@ -476,7 +498,7 @@ const Leads = ({
       const currentLead = leadsData.find((l) => l.id === leadId);
       const hasNoObservacao = !currentLead || !currentLead.observacao || currentLead.observacao.trim() === '';
 
-      if ((finalStatus === 'Em Contato' || finalStatus === 'Sem Contato' || finalStatus?.startsWith('Agendado')) && hasNoObservacao) {
+      if ((finalStatus === 'Em Contato' || finalStatus === 'Sem Contato' || (typeof finalStatus === 'string' && finalStatus.startsWith('Agendado'))) && hasNoObservacao) {
         setIsEditingObservacao((prev) => ({ ...prev, [leadId]: true }));
       } else {
         setIsEditingObservacao((prev) => ({ ...prev, [leadId]: false }));
@@ -636,7 +658,7 @@ const Leads = ({
           <>
             {leadsPagina.map((lead) => {
               const responsavel = usuarios ? usuarios.find((u) => u.nome === lead.responsavel) : null;
-              const hasObservacaoSection = (lead.status === 'Em Contato' || lead.status === 'Sem Contato' || (lead.status && lead.status.startsWith && lead.status.startsWith('Agendado')));
+              const hasObservacaoSection = (lead.status === 'Em Contato' || lead.status === 'Sem Contato' || isStatusAgendado(lead.status));
 
               return (
                 <div
