@@ -371,14 +371,58 @@ const Leads = ({
     return parts.length > 1 ? parts[1] : null;
   };
 
+  // -------------------------
+  // VISIBILITY: apenas admin vê todos; usuário vê apenas os leads atribuídos a ele
+  // -------------------------
+  const isAdmin = usuarioLogado?.tipo === 'Admin';
+
+  const getCurrentUserFromPropOrStorage = () => {
+    if (usuarioLogado) return usuarioLogado;
+    try {
+      const raw = localStorage.getItem('user');
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const canViewLead = (lead) => {
+    if (isAdmin) return true;
+    const user = getCurrentUserFromPropOrStorage();
+    if (!user) return false;
+
+    // user id values could be in different keys
+    const userId = String(user.id ?? user.ID ?? user.userId ?? '').trim();
+    const userNome = String(user.nome ?? user.name ?? user.usuario ?? '').trim().toLowerCase();
+
+    // lead.usuarioId can be number or string
+    const leadUsuarioId = lead.usuarioId !== undefined && lead.usuarioId !== null ? String(lead.usuarioId).trim() : '';
+    if (leadUsuarioId && userId && leadUsuarioId === userId) return true;
+
+    // Compare responsavel / Responsavel names
+    const leadResponsavel = String(lead.responsavel ?? lead.Responsavel ?? '').trim().toLowerCase();
+    if (leadResponsavel && userNome && leadResponsavel === userNome) return true;
+
+    // Fallback: raw.usuario/login match
+    const leadUsuarioLogin = String(lead.usuario ?? lead.user ?? lead.raw?.usuario ?? lead.raw?.user ?? '').trim();
+    const userLogin = String(user.usuario ?? '').trim();
+    if (leadUsuarioLogin && userLogin && leadUsuarioLogin === userLogin) return true;
+
+    return false;
+  };
+  // -------------------------
+
   const contagens = useMemo(() => {
+    // Work off visible leads only
+    const visibleLeads = leadsData.filter((l) => canViewLead(l));
     let emContatoCount = 0;
     let semContatoCount = 0;
     let agendadosCount = 0;
     let todosCount = 0;
     const today = new Date().toLocaleDateString('pt-BR');
 
-    leadsData.forEach((lead) => {
+    visibleLeads.forEach((lead) => {
       const s = lead.status ?? '';
       if (s !== 'Fechado' && s !== 'Perdido') {
         todosCount++;
@@ -406,7 +450,7 @@ const Leads = ({
       agendadosHoje: agendadosCount,
       todosPendentes: todosCount,
     };
-  }, [leadsData]);
+  }, [leadsData, usuarioLogado]); // recalcula quando leadsData ou usuarioLogado mudar
 
   useEffect(() => {
     setHasScheduledToday(contagens.agendadosHoje > 0);
@@ -461,40 +505,42 @@ const Leads = ({
     return nomeNormalizado.includes(filtroNormalizado);
   };
 
-  const gerais = leadsData.filter((lead) => {
-    const s = lead.status ?? '';
-    if (s === 'Fechado' || s === 'Perdido') return false;
+  // Filtra por visibilidade primeiro (apenas leads atribuídos ao usuário, salvo Admin)
+  const gerais = leadsData
+    .filter((lead) => canViewLead(lead))
+    .filter((lead) => {
+      const s = lead.status ?? '';
+      if (s === 'Fechado' || s === 'Perdido') return false;
 
-    if (filtroStatus) {
-      if (filtroStatus === 'Agendado') {
-        const today = new Date();
-        const todayFormatted = today.toLocaleDateString('pt-BR');
-        const statusDateStr = extractStatusDate(lead.status);
-        if (!statusDateStr) return false;
-        const [dia, mes, ano] = statusDateStr.split('/');
-        const statusDate = new Date(`${ano}-${mes}-${dia}T00:00:00`);
-        const statusDateFormatted = statusDate.toLocaleDateString('pt-BR');
-        return isStatusAgendado(lead.status) && statusDateFormatted === todayFormatted;
+      if (filtroStatus) {
+        if (filtroStatus === 'Agendado') {
+          const today = new Date();
+          const todayFormatted = today.toLocaleDateString('pt-BR');
+          const statusDateStr = extractStatusDate(lead.status);
+          if (!statusDateStr) return false;
+          const [dia, mes, ano] = statusDateStr.split('/');
+          const statusDate = new Date(`${ano}-${mes}-${dia}T00:00:00`);
+          const statusDateFormatted = statusDate.toLocaleDateString('pt-BR');
+          return isStatusAgendado(lead.status) && statusDateFormatted === todayFormatted;
+        }
+        return lead.status === filtroStatus;
       }
-      return lead.status === filtroStatus;
-    }
 
-    if (filtroData) {
-      const leadMesAno = lead.createdAt ? String(lead.createdAt).substring(0, 7) : '';
-      return leadMesAno === filtroData;
-    }
+      if (filtroData) {
+        const leadMesAno = lead.createdAt ? String(lead.createdAt).substring(0, 7) : '';
+        return leadMesAno === filtroData;
+      }
 
-    if (filtroNome) {
-      return nomeContemFiltro(lead.Nome || lead.name || lead.nome, filtroNome);
-    }
+      if (filtroNome) {
+        return nomeContemFiltro(lead.Nome || lead.name || lead.nome, filtroNome);
+      }
 
-    return true;
-  });
+      return true;
+    });
 
   const totalPaginas = Math.max(1, Math.ceil(gerais.length / leadsPorPagina));
   const paginaCorrigida = Math.min(paginaAtual, totalPaginas);
   const usuariosAtivos = usuarios ? usuarios.filter((u) => u.status === 'Ativo') : [];
-  const isAdmin = usuarioLogado?.tipo === 'Admin';
 
   const handleSelect = (leadId, userId) => {
     setSelecionados((prev) => ({
