@@ -218,7 +218,7 @@ const LeadsFechados = ({ usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDe
         // ORDENAÇÃO
         const fechadosOrdenados = [...fechadosAtuais].sort((a, b) => {
             const dataA = new Date(getDataParaComparacao(a.Data) + 'T00:00:00');
-            const dataB = new Date(getDataParaComparacao(b.Data) + 'T00:00:00');
+            const dataB = new Date(new Date(getDataParaComparacao(b.Data) + 'T00:00:00'));
             return dataB.getTime() - dataA.getTime();
         });
 
