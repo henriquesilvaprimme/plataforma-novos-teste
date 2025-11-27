@@ -149,7 +149,7 @@ const Leads = ({
       parcelamento: data.parcelamento ?? data.Parcelamento ?? '',
       VigenciaFinal: data.VigenciaFinal ?? data.vigenciaFinal ?? '',
       VigenciaInicial: data.VigenciaInicial ?? data.vigenciaInicial ?? '',
-      createdAt: toISO(data.createdAt ?? data.data ?? data.Data),
+      createdAt: toISO(data.createdAt ?? data.data ?? data.Data ?? data.criadoEm), // Adicionado data.criadoEm
       responsavel: data.responsavel ?? data.Responsavel ?? '',
       editado: data.editado ?? '',
       observacao: data.observacao ?? data.Observacao ?? '',
@@ -410,12 +410,18 @@ const Leads = ({
   };
 
   const isSameMonthAndYear = (leadDateStr, filtroMesAno) => {
-    if (!filtroMesAno) return true;
-    if (!leadDateStr) return false;
-    const leadData = new Date(leadDateStr);
-    const leadAno = leadData.getFullYear();
-    const leadMes = String(leadData.getMonth() + 1).padStart(2, '0');
-    return filtroMesAno === `${leadAno}-${leadMes}`;
+    if (!filtroMesAno) return true; // Sem filtro de data
+    if (!leadDateStr) return false; // Lead sem data de criação
+
+    try {
+      const leadDate = new Date(leadDateStr);
+      const [filtroAno, filtroMes] = filtroMesAno.split('-').map(Number);
+
+      return leadDate.getFullYear() === filtroAno && (leadDate.getMonth() + 1) === filtroMes;
+    } catch (e) {
+      console.error("Erro ao comparar datas:", e);
+      return false;
+    }
   };
 
   const nomeContemFiltro = (leadNome, filtroNome) => {
@@ -456,8 +462,7 @@ const Leads = ({
 
       // Se houver filtro de data, aplica
       if (filtroData) {
-        const leadMesAno = lead.createdAt ? String(lead.createdAt).substring(0, 7) : '';
-        return leadMesAno === filtroData;
+        return isSameMonthAndYear(lead.createdAt, filtroData);
       }
 
       // Se houver filtro de nome, aplica
@@ -567,17 +572,6 @@ const Leads = ({
   const handlePaginaProxima = () => {
     setPaginaAtual((prev) => Math.min(prev + 1, totalPaginas));
     scrollToTop();
-  };
-
-  const formatarData = (dataStr) => {
-    if (!dataStr) return '';
-    try {
-      const d = new Date(dataStr);
-      if (isNaN(d.getTime())) return '';
-      return d.toLocaleDateString('pt-BR');
-    } catch {
-      return '';
-    }
   };
 
   const handleObservacaoChange = (leadId, text) => {
@@ -741,7 +735,7 @@ const Leads = ({
     return toDateInputValue(d);
   };
 
-  // Formatação de moeda para input: aceita digitação de números e formata como R$
+  // Formatação de moeda para input: aceita digitação de números e formatado como R$
   const formatCurrencyFromDigits = (digits) => {
     if (!digits) return '';
     const int = parseInt(digits, 10);
@@ -1119,8 +1113,8 @@ const Leads = ({
                           Vigência
                         </h3>
                         <div className="space-y-2 text-sm text-gray-700 mb-6">
-                          <p><strong>Início:</strong> {formatarData(lead.VigenciaInicial)}</p>
-                          <p><strong>Término:</strong> {formatarData(lead.VigenciaFinal)}</p>
+                          <p><strong>Início:</strong> {formatDDMMYYYYFromISO(lead.VigenciaInicial)}</p>
+                          <p><strong>Término:</strong> {formatDDMMYYYYFromISO(lead.VigenciaFinal)}</p>
                         </div>
                         <div className="w-full py-3 px-4 rounded-xl font-bold bg-green-100 text-green-700 flex items-center justify-center border border-green-300">
                           <CheckCircle size={20} className="mr-2" />
@@ -1218,9 +1212,9 @@ const Leads = ({
 
                   <div
                     className="absolute bottom-2 right-4 text-xs text-gray-400 italic"
-                    title={`Criado em: ${formatarData(lead.createdAt)}`}
+                    title={`Criado em: ${formatDDMMYYYYFromISO(lead.createdAt)}`}
                   >
-                    Criado em: {formatarData(lead.createdAt)}
+                    Criado em: {formatDDMMYYYYFromISO(lead.createdAt)}
                   </div>
                 </div>
               );
