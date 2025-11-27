@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { RefreshCcw, Search, CheckCircle, DollarSign, Calendar, Edit, X } from 'lucide-react';
+import { RefreshCcw, Search, CheckCircle, DollarSign, Calendar } from 'lucide-react';
+import { collection, onSnapshot, query, orderBy, getDocs } from 'firebase/firestore';
+import { db } from './firebase';
 
 // ===============================================
 // 1. COMPONENTE PRINCIPAL: LeadsFechados
 // ===============================================
 
-const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDetalhes, fetchLeadsFechadosFromSheet, isAdmin, scrollContainerRef }) => {
+const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDetalhes, fetchLeadsFechadosFromSheet: _fetch_unused, isAdmin, scrollContainerRef }) => {
     // --- ESTADOS ---
     const [fechadosFiltradosInterno, setFechadosFiltradosInterno] = useState([]);
     const [paginaAtual, setPaginaAtual] = useState(1);
@@ -16,8 +18,10 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
     const [isLoading, setIsLoading] = useState(false);
     const [nomeInput, setNomeInput] = useState('');
 
+    // Novo estado: leads vindos do Firestore
+    const [leadsFromFirebase, setLeadsFromFirebase] = useState([]);
+
     // >>> NOVO ESTADO: Controle de edição de nome <<<
-    // O estado nomeEditando foi removido para que a edição fique sempre aberta.
     const [nomeTemporario, setNomeTemporario] = useState({}); // Mapeia ID para o texto temporário no input
 
     const getMesAnoAtual = () => {
@@ -89,7 +93,7 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
         const filtroLimpo = nomeInput.trim();
         setFiltroNome(filtroLimpo);
         setFiltroData('');
-        setDataInput('');
+        setNomeInput('');
         setPaginaAtual(1);
         scrollToTop();
     };
@@ -102,10 +106,34 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
         scrollToTop();
     };
 
+    // --- Novo: Listener em tempo real para leadsFechados no Firestore ---
+    useEffect(() => {
+        setIsLoading(true);
+        try {
+            const q = query(collection(db, 'leadsFechados'), orderBy('closedAt', 'desc'));
+            const unsub = onSnapshot(q, (snapshot) => {
+                const lista = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                setLeadsFromFirebase(lista);
+                setIsLoading(false);
+            }, (err) => {
+                console.error('Erro no listener leadsFechados:', err);
+                setIsLoading(false);
+            });
+
+            return () => unsub();
+        } catch (err) {
+            console.error('Erro ao iniciar listener leadsFechados:', err);
+            setIsLoading(false);
+        }
+    }, []);
+
+    // Handler de refresh manual (busca via getDocs)
     const handleRefresh = async () => {
         setIsLoading(true);
         try {
-            await fetchLeadsFechadosFromSheet();
+            const snapshot = await getDocs(query(collection(db, 'leadsFechados'), orderBy('closedAt', 'desc')));
+            const lista = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+            setLeadsFromFirebase(lista);
         } catch (error) {
             console.error('Erro ao atualizar leads fechados:', error);
         } finally {
@@ -113,38 +141,37 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
         }
     };
 
-    // --- EFEITO DE CARREGAMENTO INICIAL ---
-    useEffect(() => {
-        handleRefresh();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
     // --- EFEITO DE FILTRAGEM E SINCRONIZAÇÃO DE ESTADOS ---
     useEffect(() => {
-        const fechadosAtuais = leads.filter(lead => lead.Status === 'Fechado');
+        // Usa leadsFromFirebase (não mais a prop 'leads')
+        const fechadosAtuais = (leadsFromFirebase || []).filter(lead => {
+            // Considera 'Status' ser 'Fechado' ou 'Status' undefined mas assumido fechado se existir closedAt
+            if (lead.Status) return String(lead.Status) === 'Fechado';
+            if (lead.status) return String(lead.status) === 'Fechado';
+            if (lead.closedAt) return true;
+            return false;
+        });
 
         // Sincronização de estados
         setValores(prevValores => {
             const novosValores = { ...prevValores };
             fechadosAtuais.forEach(lead => {
-                const rawPremioFromApi = String(lead.PremioLiquido || '');
+                const rawPremioFromApi = String(lead.PremioLiquido ?? lead.premioLiquido ?? '');
                 const premioFromApi = parseFloat(rawPremioFromApi.replace('.', '').replace(',', '.'));
                 const premioInCents = isNaN(premioFromApi) || rawPremioFromApi === '' ? null : Math.round(premioFromApi * 100);
 
                 const apiComissao = lead.Comissao ? String(lead.Comissao).replace('.', ',') : '';
-                const apiParcelamento = lead.Parcelamento || '';
-                const apiInsurer = lead.Seguradora || '';
-                // >>> NOVO: Meio de Pagamento <<<
-                const apiMeioPagamento = lead.MeioPagamento || '';
-                // >>> NOVO: Cartao Porto Seguro Novo? <<<
-                const apiCartaoPortoNovo = lead.CartaoPortoNovo || '';
+                const apiParcelamento = lead.Parcelamento ?? lead.parcelamento ?? '';
+                const apiInsurer = lead.Seguradora ?? lead.insurer ?? '';
+
+                const apiMeioPagamento = lead.MeioPagamento ?? lead.MeioPagamento ?? '';
+                const apiCartaoPortoNovo = lead.CartaoPortoNovo ?? '';
 
                 if (!novosValores[lead.ID] ||
                     (novosValores[lead.ID].PremioLiquido === undefined && premioInCents !== null) ||
                     (novosValores[lead.ID].Comissao === undefined && apiComissao !== '') ||
                     (novosValores[lead.ID].Parcelamento === undefined && apiParcelamento !== '') ||
                     (novosValores[lead.ID].insurer === undefined && apiInsurer !== '') ||
-                    // >>> NOVO: Inicialização para Meio de Pagamento e Cartão Porto Novo <<<
                     (novosValores[lead.ID].MeioPagamento === undefined && apiMeioPagamento !== '') ||
                     (novosValores[lead.ID].CartaoPortoNovo === undefined && apiCartaoPortoNovo !== '')
                 ) {
@@ -154,7 +181,6 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
                         Comissao: apiComissao,
                         Parcelamento: apiParcelamento,
                         insurer: apiInsurer,
-                        // >>> NOVO: Meio de Pagamento e Cartão Porto Novo no estado <<<
                         MeioPagamento: apiMeioPagamento,
                         CartaoPortoNovo: apiCartaoPortoNovo,
                     };
@@ -163,25 +189,23 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
             return novosValores;
         });
 
-        // >>> NOVO: Sincronização do estado de Nome Temporário <<<
+        // Sincronização do estado de Nome Temporário
         setNomeTemporario(prevNomes => {
             const novosNomes = { ...prevNomes };
             fechadosAtuais.forEach(lead => {
                 if (novosNomes[lead.ID] === undefined) {
-                    novosNomes[lead.ID] = lead.name || '';
+                    novosNomes[lead.ID] = lead.name || lead.Name || '';
                 }
             });
             return novosNomes;
         });
-        // <<< FIM NOVO ESTADO NOME TEMPORÁRIO >>>
-
 
         setPremioLiquidoInputDisplay(prevDisplay => {
             const newDisplay = { ...prevDisplay };
             fechadosAtuais.forEach(lead => {
-                const currentPremio = String(lead.PremioLiquido || '');
+                const currentPremio = String(lead.PremioLiquido ?? '');
                 if (currentPremio !== '') {
-                    const premioFloat = parseFloat(currentPremio.replace(',', '.'));
+                    const premioFloat = parseFloat(currentPremio.toString().replace(',', '.'));
                     newDisplay[lead.ID] = isNaN(premioFloat) ? '' : premioFloat.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 } else if (prevDisplay[lead.ID] === undefined) {
                     newDisplay[lead.ID] = '';
@@ -193,8 +217,8 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
         setVigencia(prevVigencia => {
             const novasVigencias = { ...prevVigencia };
             fechadosAtuais.forEach(lead => {
-                const vigenciaInicioStrApi = String(lead.VigenciaInicial || '');
-                const vigenciaFinalStrApi = String(lead.VigenciaFinal || '');
+                const vigenciaInicioStrApi = String(lead.VigenciaInicial ?? lead.vigenciaInicial ?? '');
+                const vigenciaFinalStrApi = String(lead.VigenciaFinal ?? lead.vigenciaFinal ?? '');
 
                 if (!novasVigencias[lead.ID] || (novasVigencias[lead.ID].inicio === undefined && vigenciaInicioStrApi !== '')) {
                     novasVigencias[lead.ID] = { ...novasVigencias[lead.ID], inicio: vigenciaInicioStrApi };
@@ -217,7 +241,7 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
         let leadsFiltrados;
         if (filtroNome) {
             leadsFiltrados = fechadosOrdenados.filter(lead =>
-                nomeContemFiltro(lead.name, filtroNome)
+                nomeContemFiltro(lead.name || lead.Name, filtroNome)
             );
         } else if (filtroData) {
             leadsFiltrados = fechadosOrdenados.filter(lead => {
@@ -230,7 +254,7 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
         }
 
         setFechadosFiltradosInterno(leadsFiltrados);
-    }, [leads, filtroNome, filtroData]);
+    }, [leadsFromFirebase, filtroNome, filtroData]);
 
 
     // --- FUNÇÕES DE HANDLER (NOVAS E EXISTENTES) ---
@@ -243,24 +267,18 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
     // >>> NOVO HANDLER: Lógica para editar o nome do lead <<<
     const handleNomeBlur = (id, novoNome) => {
         const nomeAtualizado = novoNome.trim();
-        // setNomeEditando(null); // REMOVIDO: O campo não precisa sair do modo de edição
-        
-        // Verifica se o nome realmente mudou para evitar chamadas desnecessárias à API
-        const lead = leads.find(l => l.ID === id);
+        const lead = (leadsFromFirebase || []).find(l => String(l.ID) === String(id) || String(l.id) === String(id));
         if (lead && lead.name !== nomeAtualizado) {
             if (nomeAtualizado) {
-                // 1. Atualiza o estado local temporário (que é exibido no card)
                 setNomeTemporario(prev => ({
                     ...prev,
                     [`${id}`]: nomeAtualizado,
                 }));
-                // 2. Chama a função de atualização da prop, enviando 'name' para o Sheets
                 onUpdateDetalhes(id, 'name', nomeAtualizado);
             } else {
-                // Se o campo ficou vazio, reverte para o nome original (ou deixa a lógica de validação na API)
                 setNomeTemporario(prev => ({
                     ...prev,
-                    [`${id}`]: lead.name,
+                    [`${id}`]: lead.name || '',
                 }));
             }
         }
@@ -330,7 +348,6 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
         }));
     };
 
-    // Converte para float (com ponto decimal) antes de enviar a atualização
     const handleComissaoBlur = (id) => {
         const comissaoInput = valores[`${id}`]?.Comissao || '';
         const comissaoFloat = parseFloat(comissaoInput.replace(',', '.'));
@@ -362,11 +379,9 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
                 },
             };
             
-            // Lógica de limpeza: Se o novo Meio de Pagamento não for 'CP',
-            // limpe o campo 'CartaoPortoNovo' se ele estiver preenchido.
             if (valor !== 'CP' && newState[`${id}`]?.CartaoPortoNovo) {
                 newState[`${id}`].CartaoPortoNovo = '';
-                onUpdateDetalhes(id, 'CartaoPortoNovo', ''); // Limpa na API também
+                onUpdateDetalhes(id, 'CartaoPortoNovo', '');
             }
             
             return newState;
@@ -375,9 +390,6 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
         onUpdateDetalhes(id, 'MeioPagamento', valor);
     };
 
-    // ************************************************************
-    // NOVO HANDLER: Cartão Porto Seguro Novo?
-    // ************************************************************
     const handleCartaoPortoChange = (id, valor) => {
         setValores(prev => ({
             ...prev,
@@ -389,9 +401,6 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
         onUpdateDetalhes(id, 'CartaoPortoNovo', valor);
     };
 
-    // ************************************************************
-    // Handler para Seguradora (Atualizado para se integrar aos novos campos)
-    // ************************************************************
     const handleInsurerChange = (id, valor) => {
         const portoSeguradoras = ['Porto Seguro', 'Azul Seguros', 'Itau Seguros'];
         
@@ -404,8 +413,6 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
                 },
             };
             
-            // Lógica de limpeza: Se a nova seguradora não for Porto/Azul/Itaú,
-            // limpe o campo 'CartaoPortoNovo' se ele estiver preenchido.
             if (!portoSeguradoras.includes(valor) && newState[`${id}`]?.CartaoPortoNovo) {
                 newState[`${id}`].CartaoPortoNovo = '';
                 onUpdateDetalhes(id, 'CartaoPortoNovo', ''); // Limpa na API também
@@ -438,7 +445,6 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
             },
         }));
 
-        // Atualiza a planilha/API com as datas (estas podem ser atualizadas imediatamente, se desejar)
         onUpdateDetalhes(id, 'VigenciaInicial', dataString);
         onUpdateDetalhes(id, 'VigenciaFinal', dataFinal);
     };
@@ -542,24 +548,20 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
                     </div>
                 ) : (
                     leadsPagina.map((lead) => {
-                        const responsavel = usuarios.find((u) => u.nome === lead.Responsavel);
-                        const isSeguradoraPreenchida = !!lead.Seguradora;
+                        const responsavel = usuarios.find((u) => u.nome === lead.Responsavel || u.nome === lead.Responsavel);
+                        const isSeguradoraPreenchida = !!(lead.Seguradora || lead.insurer);
 
                         // Variáveis de estado para a lógica condicional
-                        const currentInsurer = valores[`${lead.ID}`]?.insurer || '';
+                        const currentInsurer = valores[`${lead.ID}`]?.insurer || valores[`${lead.ID}`]?.insurer || '';
                         const currentMeioPagamento = valores[`${lead.ID}`]?.MeioPagamento || '';
                         const isPortoInsurer = ['Porto Seguro', 'Azul Seguros', 'Itau Seguros'].includes(currentInsurer);
                         const isCPPayment = currentMeioPagamento === 'CP';
 
-                        // Lógica de exibição do Cartão Porto Novo:
-                        // Somente se a seguradora for Porto/Azul/Itaú E o meio de pagamento for CP.
                         const showCartaoPortoNovo = isPortoInsurer && isCPPayment;
 
-                        // Lógica de desativação do botão de confirmação
                         const isButtonDisabled =
-                            !valores[`${lead.ID}`]?.insurer ||
-                            valores[`${lead.ID}`]?.PremioLiquido === null ||
-                            valores[`${lead.ID}`]?.PremioLiquido === undefined ||
+                            !valores[`${lead.ID}`]?.insurer &&
+                            (valores[`${lead.ID}`]?.PremioLiquido === null || valores[`${lead.ID}`]?.PremioLiquido === undefined) ||
                             !valores[`${lead.ID}`]?.Comissao ||
                             parseFloat(String(valores[`${lead.ID}`]?.Comissao || '0').replace(',', '.')) === 0 ||
                             !valores[`${lead.ID}`]?.Parcelamento ||
@@ -575,42 +577,34 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
                                 {/* COLUNA 1: Informações do Lead */}
                                 <div className="col-span-1 border-b pb-4 lg:border-r lg:pb-0 lg:pr-6">
                                     
-                                    {/* >>> NOVO: Lógica de Edição de Nome do Lead (SEMPRE ABERTO OU BLOQUEADO) <<< */}
                                     <div className="flex items-center gap-2 mb-2">
                                         {isSeguradoraPreenchida ? (
-                                            // BLOQUEADO: Se a seguradora estiver preenchida
-                                            <h3 className="text-xl font-bold text-gray-900">{nomeTemporario[lead.ID] || lead.name}</h3>
+                                            <h3 className="text-xl font-bold text-gray-900">{nomeTemporario[lead.ID] || lead.name || lead.Name}</h3>
                                         ) : (
-                                            // SEMPRE ABERTO: Se a seguradora NÃO estiver preenchida
                                             <div className="flex flex-col w-full">
                                                 <input
                                                     type="text"
-                                                    value={nomeTemporario[lead.ID] || ''}
+                                                    value={nomeTemporario[lead.ID] || lead.name || lead.Name || ''}
                                                     onChange={(e) => setNomeTemporario(prev => ({ ...prev, [lead.ID]: e.target.value }))}
                                                     onBlur={(e) => handleNomeBlur(lead.ID, e.target.value)}
                                                     onKeyDown={(e) => {
                                                         if (e.key === 'Enter') {
                                                             e.currentTarget.blur();
                                                         }
-                                                        // A lógica de 'Escape' foi removida, o campo fica sempre aberto até o blur.
                                                     }}
                                                     className="text-xl font-bold text-gray-900 border border-indigo-300 rounded-lg p-1 focus:ring-indigo-500 focus:border-indigo-500"
-                                                    // autoFocus removido para evitar problemas de foco em múltiplos componentes
                                                 />
                                                 <span className='text-xs text-gray-500 mt-1'>Atualize o nome com o mesmo da proposta.</span>
                                             </div>
                                         )}
-                                        {/* O botão de edição foi removido */}
                                     </div>
-                                    {/* <<< FIM NOVO: Lógica de Edição de Nome do Lead >>> */}
-
 
                                     <div className="space-y-1 text-sm text-gray-700">
-                                        <p><strong>Modelo:</strong> {lead.vehicleModel}</p>
-                                        <p><strong>Ano/Modelo:</strong> {lead.vehicleYearModel}</p>
-                                        <p><strong>Cidade:</strong> {lead.city}</p>
-                                        <p><strong>Telefone:</strong> {lead.phone}</p>
-                                        <p><strong>Tipo de Seguro:</strong> {lead.insuranceType}</p>
+                                        <p><strong>Modelo:</strong> {lead.vehicleModel || lead.Modelo || ''}</p>
+                                        <p><strong>Ano/Modelo:</strong> {lead.vehicleYearModel || lead.anoModelo || ''}</p>
+                                        <p><strong>Cidade:</strong> {lead.city || lead.Cidade || ''}</p>
+                                        <p><strong>Telefone:</strong> {lead.phone || lead.Telefone || ''}</p>
+                                        <p><strong>Tipo de Seguro:</strong> {lead.insuranceType || lead.TipoSeguro || ''}</p>
                                     </div>
 
                                     {responsavel && isAdmin && (
@@ -631,15 +625,15 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
                                     <div className="mb-4">
                                         <label className="text-xs font-semibold text-gray-600 block mb-1">Seguradora</label>
                                         <select
-                                            value={valores[`${lead.ID}`]?.insurer || ''}
+                                            value={valores[`${lead.ID}`]?.insurer || lead.Seguradora || ''}
                                             onChange={(e) => handleInsurerChange(lead.ID, e.target.value)}
-                                            disabled={isSeguradoraPreenchida}
+                                            disabled={!!(lead.Seguradora || lead.insurer)}
                                             className="w-full p-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500"
                                         >
                                             <option value="">Selecione a seguradora</option>
-                                            <option value="Porto Seguro">Porto Seguro</option>
-                                            <option value="Azul Seguros">Azul Seguros</option>
-                                            <option value="Itau Seguros">Itau Seguros</option>
+                                            <option value="Porto Seguro">Porto Seguro</option>
+                                            <option value="Azul Seguros">Azul Seguros</option>
+                                            <option value="Itau Seguros">Itau Seguros</option>
                                             <option value="Tokio">Tokio</option>
                                             <option value="Yelum">Yelum</option>
                                             <option value="Bradesco">Bradesco</option>
@@ -658,9 +652,9 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
                                     <div className="mb-4">
                                         <label className="text-xs font-semibold text-gray-600 block mb-1">Meio de Pagamento</label>
                                         <select
-                                            value={valores[`${lead.ID}`]?.MeioPagamento || ''}
+                                            value={valores[`${lead.ID}`]?.MeioPagamento || lead.MeioPagamento || ''}
                                             onChange={(e) => handleMeioPagamentoChange(lead.ID, e.target.value)}
-                                            disabled={isSeguradoraPreenchida}
+                                            disabled={!!(lead.Seguradora || lead.insurer)}
                                             className="w-full p-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500"
                                         >
                                             <option value=""> </option>
@@ -676,9 +670,9 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
                                         <div className="mb-4">
                                             <label className="text-xs font-semibold text-gray-600 block mb-1">Cartão Porto Seguro Novo?</label>
                                             <select
-                                                value={valores[`${lead.ID}`]?.CartaoPortoNovo || ''}
+                                                value={valores[`${lead.ID}`]?.CartaoPortoNovo || lead.CartaoPortoNovo || ''}
                                                 onChange={(e) => handleCartaoPortoChange(lead.ID, e.target.value)}
-                                                disabled={isSeguradoraPreenchida}
+                                                disabled={!!(lead.Seguradora || lead.insurer)}
                                                 className="w-full p-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500"
                                             >
                                                 <option value=""> </option>
@@ -689,8 +683,7 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
                                     )}
                                     
                                     {/* 4., 5., 6. Demais campos (Prêmio, Comissão, Parcelamento) */}
-                                    <div className="grid grid-cols-2 gap-3 mt-4"> {/* Adicionado mt-4 para espaçamento após os novos campos */}
-                                        {/* Prêmio Líquido (Input) */}
+                                    <div className="grid grid-cols-2 gap-3 mt-4">
                                         <div>
                                             <label className="text-xs font-semibold text-gray-600 block mb-1">Prêmio Líquido</label>
                                             <div className="relative">
@@ -701,13 +694,12 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
                                                     value={premioLiquidoInputDisplay[`${lead.ID}`] || ''}
                                                     onChange={(e) => handlePremioLiquidoChange(lead.ID, e.target.value)}
                                                     onBlur={() => handlePremioLiquidoBlur(lead.ID)}
-                                                    disabled={isSeguradoraPreenchida}
+                                                    disabled={!!(lead.Seguradora || lead.insurer)}
                                                     className="w-full p-2 pl-8 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500 text-right"
                                                 />
                                             </div>
                                         </div>
 
-                                        {/* Comissão (Input) */}
                                         <div>
                                             <label className="text-xs font-semibold text-gray-600 block mb-1">Comissão (%)</label>
                                             <div className="relative">
@@ -718,19 +710,18 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
                                                     value={valores[`${lead.ID}`]?.Comissao || ''}
                                                     onChange={(e) => handleComissaoChange(lead.ID, e.target.value)}
                                                     onBlur={() => handleComissaoBlur(lead.ID)}
-                                                    disabled={isSeguradoraPreenchida}
+                                                    disabled={!!(lead.Seguradora || lead.insurer)}
                                                     className="w-full p-2 pl-8 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500 text-right"
                                                 />
                                             </div>
                                         </div>
 
-                                        {/* Parcelamento (Select) */}
                                         <div className="col-span-2">
                                             <label className="text-xs font-semibold text-gray-600 block mb-1">Parcelamento</label>
                                             <select
                                                 value={valores[`${lead.ID}`]?.Parcelamento || ''}
                                                 onChange={(e) => handleParcelamentoChange(lead.ID, e.target.value)}
-                                                disabled={isSeguradoraPreenchida}
+                                                disabled={!!(lead.Seguradora || lead.insurer)}
                                                 className="w-full p-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500"
                                             >
                                                 <option value="">Selecione o Parcelamento</option>
@@ -758,7 +749,7 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
                                             type="date"
                                             value={vigencia[`${lead.ID}`]?.inicio || ''}
                                             onChange={(e) => handleVigenciaInicioChange(lead.ID, e.target.value)}
-                                            disabled={isSeguradoraPreenchida}
+                                            disabled={!!(lead.Seguradora || lead.insurer)}
                                             className="w-full p-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500"
                                         />
                                     </div>
@@ -788,7 +779,6 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
                                                     valores[`${lead.ID}`]?.Parcelamento,
                                                     vigencia[`${lead.ID}`]?.inicio,
                                                     vigencia[`${lead.ID}`]?.final,
-                                                    // Meio de Pagamento e Cartão Porto Novo na Confirmação 
                                                     valores[`${lead.ID}`]?.MeioPagamento || '',
                                                     valores[`${lead.ID}`]?.CartaoPortoNovo || ''
                                                 );
