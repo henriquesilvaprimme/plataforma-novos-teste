@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Lead from './components/Lead';
 import { RefreshCcw, Bell, Search } from 'lucide-react';
-import { collection, getDocs, doc, updateDoc, query, orderBy, onSnapshot } from 'firebase/firestore';
+import {
+  collection,
+  getDocs,
+  doc,
+  updateDoc,
+  onSnapshot,
+} from 'firebase/firestore';
 import { db } from './firebase'; // ajuste o caminho se necessário
 
 const Leads = ({
@@ -12,7 +18,6 @@ const Leads = ({
   scrollContainerRef,
   saveLocalChange,
 }) => {
-  // Estado principal dos leads vindo do Firestore
   const [leadsData, setLeadsData] = useState([]);
   const [selecionados, setSelecionados] = useState({});
   const [paginaAtual, setPaginaAtual] = useState(1);
@@ -30,7 +35,6 @@ const Leads = ({
   // Normaliza um documento do Firestore para o formato esperado pelo React
   const normalizeLead = (docId, data = {}) => {
     const safe = (v) => (v === undefined || v === null ? '' : v);
-    // Tratamento de createdAt (Timestamp -> ISO string)
     const toISO = (v) => {
       if (!v && v !== 0) return '';
       if (typeof v === 'object' && typeof v.toDate === 'function') {
@@ -45,11 +49,19 @@ const Leads = ({
     };
 
     const name = safe(data.name ?? data.Name ?? data.nome ?? data.Nome);
-    const vehicleModel = safe(data.vehicleModel ?? data.vehiclemodel ?? data.modelo ?? data.Modelo);
-    const vehicleYearModel = safe(data.vehicleYearModel ?? data.vehicleyearmodel ?? data.anoModelo ?? data.ano);
+    const vehicleModel = safe(
+      data.vehicleModel ?? data.vehiclemodel ?? data.modelo ?? data.Modelo
+    );
+    const vehicleYearModel = safe(
+      data.vehicleYearModel ?? data.vehicleyearmodel ?? data.anoModelo ?? data.ano
+    );
     const city = safe(data.city ?? data.Cidade ?? data.cidade);
-    const phone = safe(data.phone ?? data.Telefone ?? data.telefone ?? data.phoneNumber);
-    const insuranceType = safe(data.insuranceType ?? data.insurancetype ?? data.tipoSeguro ?? data.tipo_de_seguro);
+    const phone = safe(
+      data.phone ?? data.Telefone ?? data.telefone ?? data.phoneNumber
+    );
+    const insuranceType = safe(
+      data.insuranceType ?? data.insurancetype ?? data.tipoSeguro ?? data.tipo_de_seguro
+    );
 
     return {
       id: String(docId),
@@ -61,7 +73,7 @@ const Leads = ({
       city,
       phone,
       insuranceType,
-      status: typeof data.status === 'string' ? data.status : (data.Status ?? '') ,
+      status: typeof data.status === 'string' ? data.status : data.Status ?? '',
       confirmado: data.confirmado === true || data.confirmado === 'true' || false,
       insurer: data.insurer ?? '',
       insurerConfirmed: data.insurerConfirmed === true || data.insurerConfirmed === 'true' || false,
@@ -84,16 +96,36 @@ const Leads = ({
     };
   };
 
-  // Listener em tempo real para leads (onSnapshot)
+  // Listener em tempo real para leads (onSnapshot sem orderBy para robustez)
   useEffect(() => {
     setIsLoading(true);
     try {
-      const q = query(collection(db, 'leads'), orderBy('createdAt', 'desc'));
+      const collRef = collection(db, 'leads');
       const unsub = onSnapshot(
-        q,
+        collRef,
         (snapshot) => {
           const lista = snapshot.docs.map((d) => normalizeLead(d.id, d.data()));
+
+          // Ordena localmente por createdAt (se existir)
+          lista.sort((a, b) => {
+            const da = a.createdAt ? new Date(a.createdAt) : new Date(0);
+            const dbb = b.createdAt ? new Date(b.createdAt) : new Date(0);
+            return dbb - da;
+          });
+
+          // console.log('onSnapshot leads:', lista); // descomente para debugar
           setLeadsData(lista);
+
+          // Atualiza observações e flags imediatamente para refletir mudanças do formulário
+          const initialObservacoes = {};
+          const initialIsEditingObservacao = {};
+          lista.forEach((lead) => {
+            initialObservacoes[lead.id] = lead.observacao || '';
+            initialIsEditingObservacao[lead.id] = !lead.observacao || lead.observacao.trim() === '';
+          });
+          setObservacoes(initialObservacoes);
+          setIsEditingObservacao(initialIsEditingObservacao);
+
           setIsLoading(false);
         },
         (err) => {
@@ -112,7 +144,7 @@ const Leads = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Função de refresh manual caso queira forçar fetch único
+  // Fetch manual (mantido para botão Refresh)
   const fetchLeadsFromFirebase = async () => {
     setIsLoading(true);
     try {
@@ -122,7 +154,6 @@ const Leads = ({
         lista.push(normalizeLead(docSnap.id, docSnap.data()));
       });
 
-      // Ordena por createdAt (ISO) - já veio do servidor, mas garantimos
       lista.sort((a, b) => {
         const da = a.createdAt ? new Date(a.createdAt) : new Date(0);
         const dbb = b.createdAt ? new Date(b.createdAt) : new Date(0);
@@ -130,6 +161,16 @@ const Leads = ({
       });
 
       setLeadsData(lista);
+
+      // Atualiza observações e flags com os dados do fetch manual também
+      const initialObservacoes = {};
+      const initialIsEditingObservacao = {};
+      lista.forEach((lead) => {
+        initialObservacoes[lead.id] = lead.observacao || '';
+        initialIsEditingObservacao[lead.id] = !lead.observacao || lead.observacao.trim() === '';
+      });
+      setObservacoes(initialObservacoes);
+      setIsEditingObservacao(initialIsEditingObservacao);
     } catch (error) {
       console.error('Erro ao buscar leads do Firebase:', error);
       alert('Erro ao buscar leads do Firebase. Veja o console para detalhes.');
@@ -137,18 +178,6 @@ const Leads = ({
       setIsLoading(false);
     }
   };
-
-  // Atualiza observações e flags de edição quando leads chegam
-  useEffect(() => {
-    const initialObservacoes = {};
-    const initialIsEditingObservacao = {};
-    leadsData.forEach((lead) => {
-      initialObservacoes[lead.id] = lead.observacao || '';
-      initialIsEditingObservacao[lead.id] = !lead.observacao || lead.observacao.trim() === '';
-    });
-    setObservacoes(initialObservacoes);
-    setIsEditingObservacao(initialIsEditingObservacao);
-  }, [leadsData]);
 
   const normalizarTexto = (texto = '') => {
     return texto
@@ -161,19 +190,16 @@ const Leads = ({
       .trim();
   };
 
-  // helper: checa se status é string e começa com 'Agendado'
   const isStatusAgendado = (status) => {
     return typeof status === 'string' && status.startsWith('Agendado');
   };
 
-  // helper: extrai data dd/mm/yyyy do campo status (ex: "Agendado - 25/12/2025")
   const extractStatusDate = (status) => {
     if (typeof status !== 'string') return null;
     const parts = status.split(' - ');
     return parts.length > 1 ? parts[1] : null;
   };
 
-  // --- LÓGICA DE CONTAGEM ---
   const contagens = useMemo(() => {
     let emContatoCount = 0;
     let semContatoCount = 0;
@@ -183,7 +209,6 @@ const Leads = ({
 
     leadsData.forEach((lead) => {
       const s = lead.status ?? '';
-      // Ignorar Fechado e Perdido do total Geral (pendentes)
       if (s !== 'Fechado' && s !== 'Perdido') {
         todosCount++;
       }
@@ -211,21 +236,13 @@ const Leads = ({
       todosPendentes: todosCount,
     };
   }, [leadsData]);
-  // --- FIM DA LÓGICA DE CONTAGEM ---
 
   useEffect(() => {
     setHasScheduledToday(contagens.agendadosHoje > 0);
   }, [contagens]);
 
-  // Refresh agora recarrega do Firebase (fetch único)
   const handleRefreshLeads = async () => {
     await fetchLeadsFromFirebase();
-    // atualizar flags de edição para os leads recém-buscados
-    const refreshedIsEditingObservacao = {};
-    leadsData.forEach((lead) => {
-      refreshedIsEditingObservacao[lead.id] = !lead.observacao || lead.observacao.trim() === '';
-    });
-    setIsEditingObservacao(refreshedIsEditingObservacao);
   };
 
   const leadsPorPagina = 10;
@@ -292,7 +309,7 @@ const Leads = ({
     }
 
     if (filtroData) {
-      const leadMesAno = lead.createdAt ? (String(lead.createdAt).substring(0,7)) : '';
+      const leadMesAno = lead.createdAt ? String(lead.createdAt).substring(0, 7) : '';
       return leadMesAno === filtroData;
     }
 
@@ -319,15 +336,12 @@ const Leads = ({
     if (!lead || !lead.id) return;
     try {
       const leadRef = doc(db, 'leads', lead.id);
-      // Atualiza apenas campos relevantes: usuarioId e responsavel (se existirem)
       const dataToUpdate = {};
       if ('usuarioId' in lead) dataToUpdate.usuarioId = lead.usuarioId ?? null;
       if ('responsavel' in lead) dataToUpdate.responsavel = lead.responsavel ?? null;
       if (Object.keys(dataToUpdate).length > 0) {
         await updateDoc(leadRef, dataToUpdate);
       }
-      // não é necessário forçar fetch se onSnapshot estiver ativo, mas mantemos comportamento seguro
-      // await fetchLeadsFromFirebase();
     } catch (error) {
       console.error('Erro ao enviar lead atualizado para Firebase:', error);
     }
@@ -341,7 +355,6 @@ const Leads = ({
       return;
     }
 
-    // Salva localmente a atribuição para retry/sync futuro (TTL gerenciado pelo App)
     if (typeof saveLocalChange === 'function') {
       saveLocalChange({
         id: leadId,
@@ -350,10 +363,8 @@ const Leads = ({
       });
     }
 
-    // Atualiza local + submete para parent
     transferirLead(leadId, finalUserId);
 
-    // Envia atualização para Firebase: set usuarioId e responsavel (nome)
     const usuario = usuariosAtivos.find((u) => String(u.id) === String(finalUserId));
     const responsavelNome = usuario ? usuario.nome : null;
 
@@ -364,7 +375,6 @@ const Leads = ({
   };
 
   const handleAlterar = async (leadId) => {
-    // Salva localmente a remoção/alteração de atribuição (usuario null) para retry/sync futuro
     if (typeof saveLocalChange === 'function') {
       saveLocalChange({
         id: leadId,
@@ -379,11 +389,9 @@ const Leads = ({
     }));
     transferirLead(leadId, null);
 
-    // Atualiza no Firestore: remove usuarioId e responsavel
     try {
       const leadRef = doc(db, 'leads', leadId);
       await updateDoc(leadRef, { usuarioId: null, responsavel: null });
-      // não é necessário fetch manual porque o listener atualiza automaticamente
     } catch (error) {
       console.error('Erro ao alterar atribuição no Firebase:', error);
       alert('Erro ao alterar atribuição. Veja o console.');
@@ -394,7 +402,6 @@ const Leads = ({
   const fim = inicio + leadsPorPagina;
   const leadsPagina = gerais.slice(inicio, fim);
 
-  // Função para rolar o contêiner principal para o topo
   const scrollToTop = () => {
     if (scrollContainerRef && scrollContainerRef.current) {
       scrollContainerRef.current.scrollTo({
@@ -416,7 +423,6 @@ const Leads = ({
 
   const formatarData = (dataStr) => {
     if (!dataStr) return '';
-    // Trata ISO string ou Timestamp
     try {
       const d = new Date(dataStr);
       if (isNaN(d.getTime())) return '';
@@ -453,7 +459,6 @@ const Leads = ({
       const leadRef = doc(db, 'leads', leadId);
       await updateDoc(leadRef, { observacao: observacaoTexto });
       setIsEditingObservacao((prev) => ({ ...prev, [leadId]: false }));
-      // não é necessário chamar fetchLeadsFromFirebase devido ao onSnapshot
     } catch (error) {
       console.error('Erro ao salvar observação no Firebase:', error);
       alert('Erro ao salvar observação. Por favor, tente novamente.');
@@ -466,7 +471,6 @@ const Leads = ({
     setIsEditingObservacao((prev) => ({ ...prev, [leadId]: true }));
   };
 
-  // Função utilitária para validar dd/mm/yyyy
   const isValidDDMMYYYY = (str) => {
     if (!str || typeof str !== 'string') return false;
     const parts = str.split('/');
@@ -477,9 +481,7 @@ const Leads = ({
     return dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
   };
 
-  // Atualiza status no Firebase e também salva observação/agendamento se necessário
   const handleConfirmStatus = async (leadId, novoStatus, phoneOrDate) => {
-    // Salva localmente a alteração de status para retry/sync futuro (TTL gerenciado pelo App)
     if (typeof saveLocalChange === 'function') {
       saveLocalChange({
         id: leadId,
@@ -488,7 +490,6 @@ const Leads = ({
       });
     }
 
-    // Notifica o parent
     try {
       onUpdateStatus && onUpdateStatus(leadId, novoStatus, phoneOrDate);
     } catch (err) {
@@ -551,8 +552,6 @@ const Leads = ({
       } else {
         setIsEditingObservacao((prev) => ({ ...prev, [leadId]: false }));
       }
-
-      // onSnapshot cuidará de atualizar leadsData
     } catch (error) {
       console.error('Erro ao atualizar status no Firebase:', error);
       alert('Erro ao atualizar status. Veja o console.');
@@ -563,7 +562,6 @@ const Leads = ({
 
   return (
     <div className="p-4 md:p-6 lg:p-8 relative min-h-screen bg-gray-100 font-sans">
-      {/* 1. Overlay de Loading */}
       {isLoading && (
         <div className="fixed inset-0 bg-white bg-opacity-80 flex justify-center items-center z-50">
           <div className="flex items-center">
@@ -576,7 +574,6 @@ const Leads = ({
         </div>
       )}
 
-      {/* 2. Cabeçalho Principal e Área de Controles */}
       <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
         <div className="flex flex-wrap itens-center justify-between gap-4 border-b pb-4 mb-4">
           <h1 className="text-4xl font-extrabold text-gray-900 flex items-center">
@@ -614,7 +611,6 @@ const Leads = ({
           </div>
         </div>
 
-        {/* Controles de Filtro */}
         <div className="flex flex-col md:flex-row gap-4 justify-between items-stretch">
           <div className="flex items-center gap-2 flex-1 min-w-[200px]">
             <input
@@ -651,7 +647,6 @@ const Leads = ({
         </div>
       </div>
 
-      {/* 3. Barra de Status/Filtros Rápidos COM CONTAGEM */}
       <div className="flex flex-wrap gap-3 justify-center mb-8">
         <button
           onClick={() => aplicarFiltroStatus('Em Contato')}
@@ -696,7 +691,6 @@ const Leads = ({
         </button>
       </div>
 
-      {/* 4. Corpo Principal - Lista de Leads */}
       <div className="space-y-5">
         {isLoading ? null : gerais.length === 0 ? (
           <div className="bg-white rounded-xl shadow-md p-6 text-center">
@@ -808,7 +802,6 @@ const Leads = ({
               );
             })}
 
-            {/* Paginação */}
             <div className="flex justify-center items-center gap-4 mt-8 pb-8">
               <button
                 onClick={handlePaginaAnterior}
