@@ -328,42 +328,63 @@ const Dashboard = ({ usuarioLogado }) => {
     setFiltroAplicado({ inicio: dataInicio, fim: dataFim });
   };
 
+  // Estilo para os contadores reduzidos e robustos
   const boxStyle = {
-    padding: '10px',
-    borderRadius: '5px',
-    flex: 1,
+    padding: '8px 12px', // Reduzido
+    borderRadius: '8px', // Mais arredondado
+    flex: '1 1 auto', // Flexível para se ajustar
     color: '#fff',
     textAlign: 'center',
+    minWidth: '120px', // Largura mínima para evitar quebra excessiva
+    maxWidth: '180px', // Largura máxima para manter compacto
+    boxShadow: '0 4px 8px rgba(0,0,0,0.1)', // Sombra para robustez
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    margin: '5px', // Espaçamento entre os boxes
+  };
+
+  const titleStyle = {
+    fontSize: '14px', // Fonte menor para o título
+    fontWeight: 'normal', // Peso normal
+    marginBottom: '5px',
+    opacity: '0.9',
+  };
+
+  const valueStyle = {
+    fontSize: '20px', // Fonte menor para o valor
+    fontWeight: 'bold',
   };
 
   const PieChartComponent = ({ percentage }) => {
-    const radius = 40;
+    const radius = 30; // Raio menor
     const circumference = 2 * Math.PI * radius;
     const strokeDashoffset = circumference - (percentage / 100) * circumference;
 
     return (
-      <svg width="100" height="100" viewBox="0 0 100 100">
+      <svg width="80" height="80" viewBox="0 0 80 80"> {/* Tamanho menor */}
         <circle
-          cx="50"
-          cy="50"
+          cx="40"
+          cy="40"
           r={radius}
           fill="transparent"
           stroke="#e0e0e0"
-          strokeWidth="10"
+          strokeWidth="8" // Largura da borda
         />
         <circle
-          cx="50"
-          cy="50"
+          cx="40"
+          cy="40"
           r={radius}
           fill="transparent"
           stroke="#4CAF50"
-          strokeWidth="10"
+          strokeWidth="8"
           strokeDasharray={circumference}
           strokeDashoffset={strokeDashoffset}
           strokeLinecap="round"
-          transform="rotate(-90 50 50)"
+          transform="rotate(-90 40 40)"
         />
-        <text x="50" y="55" textAnchor="middle" fontSize="20" fill="#333" fontWeight="bold">
+        <text x="40" y="45" textAnchor="middle" fontSize="16" fill="#333" fontWeight="bold"> {/* Fonte menor */}
           {percentage}%
         </text>
       </svg>
@@ -371,15 +392,15 @@ const Dashboard = ({ usuarioLogado }) => {
   };
 
   return (
-    <div style={{ padding: '20px' }}>
-      <h1>Dashboard</h1>
+    <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
+      <h1 style={{ fontSize: '32px', fontWeight: 'bold', color: '#333', marginBottom: '20px' }}>Dashboard</h1>
 
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '8px',
-          marginBottom: '20px',
+          gap: '10px', // Espaçamento ajustado
+          marginBottom: '30px',
           flexWrap: 'wrap',
         }}
       >
@@ -388,10 +409,11 @@ const Dashboard = ({ usuarioLogado }) => {
           value={dataInicio}
           onChange={(e) => setDataInicio(e.target.value)}
           style={{
-            padding: '6px 10px',
+            padding: '8px 12px',
             borderRadius: '6px',
             border: '1px solid #ccc',
             cursor: 'pointer',
+            fontSize: '14px',
           }}
           title="Data de Início"
         />
@@ -400,10 +422,11 @@ const Dashboard = ({ usuarioLogado }) => {
           value={dataFim}
           onChange={(e) => setDataFim(e.target.value)}
           style={{
-            padding: '6px 10px',
+            padding: '8px 12px',
             borderRadius: '6px',
             border: '1px solid #ccc',
             cursor: 'pointer',
+            fontSize: '14px',
           }}
           title="Data de Fim"
         />
@@ -414,8 +437,10 @@ const Dashboard = ({ usuarioLogado }) => {
             color: 'white',
             border: 'none',
             borderRadius: '6px',
-            padding: '6px 14px',
+            padding: '8px 16px',
             cursor: 'pointer',
+            fontSize: '14px',
+            fontWeight: 'bold',
           }}
         >
           Filtrar
@@ -429,13 +454,13 @@ const Dashboard = ({ usuarioLogado }) => {
             color: 'white',
             border: 'none',
             borderRadius: '6px',
-            padding: '6px 10px',
+            padding: '8px 12px',
             cursor: 'default',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            minWidth: '36px',
-            height: '36px',
+            minWidth: '40px',
+            height: '40px',
           }}
         >
           {(isRefreshing || isLoading) ? (
@@ -451,64 +476,64 @@ const Dashboard = ({ usuarioLogado }) => {
 
       {isLoading && (
         <div style={{ textAlign: 'center', padding: '20px' }}>
-          <p>Carregando dados do dashboard...</p>
+          <p style={{ fontSize: '16px', color: '#555' }}>Carregando dados do dashboard...</p>
         </div>
       )}
 
       {!isLoading && (
         <>
           {/* Seção de Seguros Novos */}
-          <h2 style={{ marginTop: '40px', marginBottom: '20px', fontSize: '28px', fontWeight: 'bold', color: '#333' }}>Seguros Novos</h2>
-          <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
-            <div style={{ ...boxStyle, backgroundColor: '#eee', color: '#333' }}>
-              <h3>Total de Leads</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.totalLeads}</p>
+          <h2 style={{ marginTop: '40px', marginBottom: '15px', fontSize: '24px', fontWeight: 'bold', color: '#333', borderBottom: '2px solid #eee', paddingBottom: '10px' }}>Seguros Novos</h2>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-start', gap: '10px' }}>
+            <div style={{ ...boxStyle, backgroundColor: '#424242' }}>
+              <h3 style={titleStyle}>Total de Leads</h3>
+              <p style={valueStyle}>{dashboardStats.totalLeads}</p>
             </div>
             <div style={{ ...boxStyle, backgroundColor: '#9C27B0' }}>
-              <h3>Taxa de Conversão</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.taxaConversaoLeads}%</p>
+              <h3 style={titleStyle}>Taxa de Conversão</h3>
+              <p style={valueStyle}>{dashboardStats.taxaConversaoLeads}%</p>
             </div>
             <div style={{ ...boxStyle, backgroundColor: '#4CAF50' }}>
-              <h3>Vendas</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.vendas}</p>
+              <h3 style={titleStyle}>Vendas</h3>
+              <p style={valueStyle}>{dashboardStats.vendas}</p>
             </div>
             <div style={{ ...boxStyle, backgroundColor: '#F44336' }}>
-              <h3>Leads Perdidos</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.perdidos}</p>
+              <h3 style={titleStyle}>Leads Perdidos</h3>
+              <p style={valueStyle}>{dashboardStats.perdidos}</p>
             </div>
             <div style={{ ...boxStyle, backgroundColor: '#FF9800' }}>
-              <h3>Em Contato</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.emContato}</p>
+              <h3 style={titleStyle}>Em Contato</h3>
+              <p style={valueStyle}>{dashboardStats.emContato}</p>
             </div>
             <div style={{ ...boxStyle, backgroundColor: '#9E9E9E' }}>
-              <h3>Sem Contato</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.semContato}</p>
+              <h3 style={titleStyle}>Sem Contato</h3>
+              <p style={valueStyle}>{dashboardStats.semContato}</p>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-start', gap: '10px', marginTop: '20px' }}>
             <div style={{ ...boxStyle, backgroundColor: '#003366' }}>
-              <h3>Porto Seguro</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.portoSeguroLeads}</p>
+              <h3 style={titleStyle}>Porto Seguro</h3>
+              <p style={valueStyle}>{dashboardStats.portoSeguroLeads}</p>
             </div>
             <div style={{ ...boxStyle, backgroundColor: '#87CEFA' }}>
-              <h3>Azul Seguros</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.azulSegurosLeads}</p>
+              <h3 style={titleStyle}>Azul Seguros</h3>
+              <p style={valueStyle}>{dashboardStats.azulSegurosLeads}</p>
             </div>
             <div style={{ ...boxStyle, backgroundColor: '#FF8C00' }}>
-              <h3>Itau Seguros</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.itauSegurosLeads}</p>
+              <h3 style={titleStyle}>Itau Seguros</h3>
+              <p style={valueStyle}>{dashboardStats.itauSegurosLeads}</p>
             </div>
             <div style={{ ...boxStyle, backgroundColor: '#4CAF50' }}>
-              <h3>Demais Seguradoras</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.demaisSeguradorasLeads}</p>
+              <h3 style={titleStyle}>Demais Seguradoras</h3>
+              <p style={valueStyle}>{dashboardStats.demaisSeguradorasLeads}</p>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '20px', marginTop: '20px', marginBottom: '40px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-start', gap: '10px', marginTop: '20px', marginBottom: '40px' }}>
             <div style={{ ...boxStyle, backgroundColor: '#3f51b5' }}>
-              <h3>Total Prêmio Líquido</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>
+              <h3 style={titleStyle}>Total Prêmio Líquido</h3>
+              <p style={valueStyle}>
                 {dashboardStats.totalPremioLiquidoLeads.toLocaleString('pt-BR', {
                   style: 'currency',
                   currency: 'BRL',
@@ -517,58 +542,57 @@ const Dashboard = ({ usuarioLogado }) => {
             </div>
               
             <div style={{ ...boxStyle, backgroundColor: '#009688' }}>
-              <h3>Média Comissão</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>
+              <h3 style={titleStyle}>Média Comissão</h3>
+              <p style={valueStyle}>
                 {dashboardStats.comissaoMediaGlobalLeads.replace('.', ',')}%
               </p>
             </div>
           </div>
 
           {/* Seção de Renovações */}
-          <h2 style={{ marginTop: '40px', marginBottom: '20px', fontSize: '28px', fontWeight: 'bold', color: '#333' }}>Renovações</h2>
-          <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
+          <h2 style={{ marginTop: '40px', marginBottom: '15px', fontSize: '24px', fontWeight: 'bold', color: '#333', borderBottom: '2px solid #eee', paddingBottom: '10px' }}>Renovações</h2>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-start', gap: '10px' }}>
             <div style={{ ...boxStyle, backgroundColor: '#673AB7' }}>
-              <h3>Total de Renovações</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.totalRenovacoes}</p>
+              <h3 style={titleStyle}>Total de Renovações</h3>
+              <p style={valueStyle}>{dashboardStats.totalRenovacoes}</p>
             </div>
             <div style={{ ...boxStyle, backgroundColor: '#2196F3' }}>
-              <h3>Renovados</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.renovados}</p>
+              <h3 style={titleStyle}>Renovados</h3>
+              <p style={valueStyle}>{dashboardStats.renovados}</p>
             </div>
             <div style={{ ...boxStyle, backgroundColor: '#FF5722' }}>
-              <h3>Renovações Perdidas</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.renovacoesPerdidas}</p>
+              <h3 style={titleStyle}>Renovações Perdidas</h3>
+              <p style={valueStyle}>{dashboardStats.renovacoesPerdidas}</p>
             </div>
             <div style={{ ...boxStyle, backgroundColor: '#FFC107', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-              <h3>Taxa de Renovação</h3>
+              <h3 style={titleStyle}>Taxa de Renovação</h3>
               <PieChartComponent percentage={parseFloat(dashboardStats.taxaRenovacao)} />
             </div>
           </div>
 
-          {/* Contadores de Seguradoras para Renovações */}
-          <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-start', gap: '10px', marginTop: '20px' }}>
             <div style={{ ...boxStyle, backgroundColor: '#003366' }}>
-              <h3>Porto Seguro Renov.</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.portoSeguroRenovacoes}</p>
+              <h3 style={titleStyle}>Porto Seguro Renov.</h3>
+              <p style={valueStyle}>{dashboardStats.portoSeguroRenovacoes}</p>
             </div>
             <div style={{ ...boxStyle, backgroundColor: '#87CEFA' }}>
-              <h3>Azul Seguros Renov.</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.azulSegurosRenovacoes}</p>
+              <h3 style={titleStyle}>Azul Seguros Renov.</h3>
+              <p style={valueStyle}>{dashboardStats.azulSegurosRenovacoes}</p>
             </div>
             <div style={{ ...boxStyle, backgroundColor: '#FF8C00' }}>
-              <h3>Itau Seguros Renov.</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.itauSegurosRenovacoes}</p>
+              <h3 style={titleStyle}>Itau Seguros Renov.</h3>
+              <p style={valueStyle}>{dashboardStats.itauSegurosRenovacoes}</p>
             </div>
             <div style={{ ...boxStyle, backgroundColor: '#4CAF50' }}>
-              <h3>Demais Seguradoras Renov.</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{dashboardStats.demaisSeguradorasRenovacoes}</p>
+              <h3 style={titleStyle}>Demais Seguradoras Renov.</h3>
+              <p style={valueStyle}>{dashboardStats.demaisSeguradorasRenovacoes}</p>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '20px', marginTop: '20px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-start', gap: '10px', marginTop: '20px' }}>
             <div style={{ ...boxStyle, backgroundColor: '#00BCD4' }}>
-              <h3>Prêmio Líquido Renovados</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>
+              <h3 style={titleStyle}>Prêmio Líquido Renovados</h3>
+              <p style={valueStyle}>
                 {dashboardStats.premioLiquidoRenovados.toLocaleString('pt-BR', {
                   style: 'currency',
                   currency: 'BRL',
@@ -576,8 +600,8 @@ const Dashboard = ({ usuarioLogado }) => {
               </p>
             </div>
             <div style={{ ...boxStyle, backgroundColor: '#8BC34A' }}>
-              <h3>Média Comissão Renovados</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>
+              <h3 style={titleStyle}>Média Comissão Renovados</h3>
+              <p style={valueStyle}>
                 {dashboardStats.mediaComissaoRenovados.replace('.', ',')}%
               </p>
             </div>
