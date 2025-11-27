@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Lead from './components/Lead';
-import { RefreshCcw, Bell, Search } from 'lucide-react';
+import { RefreshCcw, Bell, Search, CheckCircle, DollarSign, Calendar } from 'lucide-react'; // Adicionado CheckCircle, DollarSign, Calendar
 import {
   collection,
   getDocs,
@@ -510,6 +510,7 @@ const Leads = ({
     .filter((lead) => canViewLead(lead))
     .filter((lead) => {
       const s = lead.status ?? '';
+      // Leads Fechados e Perdidos não aparecem nesta lista, a menos que seja um filtro específico
       if (s === 'Fechado' || s === 'Perdido') return false;
 
       if (filtroStatus) {
@@ -940,7 +941,7 @@ const Leads = ({
         VigenciaFinal: vigFinISO || '',
         Nome: modalNome,
         name: modalNome,
-        insurerConfirmed: true,
+        insurerConfirmed: true, // Marca como confirmado para exibir o layout de fechado
       };
 
       // aplica também saveLocalChange para manter sincronização local se existir a função
@@ -959,6 +960,7 @@ const Leads = ({
             VigenciaInicial: vigIniISO || '',
             VigenciaFinal: vigFinISO || '',
             Nome: modalNome,
+            insurerConfirmed: true,
           },
         });
       }
@@ -1137,96 +1139,152 @@ const Leads = ({
             {leadsPagina.map((lead) => {
               const responsavel = usuarios ? usuarios.find((u) => u.nome === lead.responsavel) : null;
               const hasObservacaoSection = (lead.status === 'Em Contato' || lead.status === 'Sem Contato' || isStatusAgendado(lead.status));
+              const isSeguradoraPreenchida = !!lead.Seguradora && lead.insurerConfirmed; // Usar insurerConfirmed para o layout de fechado
 
               return (
                 <div
                   key={lead.id}
-                  className="bg-white rounded-xl shadow-lg hover:shadow-xl transition duration-300 p-6 relative border-t-4 border-indigo-500"
+                  className={`bg-white rounded-xl shadow-lg hover:shadow-xl transition duration-300 p-6 relative border-t-4 ${isSeguradoraPreenchida ? 'border-green-600' : 'border-indigo-500'}`}
                 >
-                  <div className={`grid ${hasObservacaoSection ? 'lg:grid-cols-2' : 'lg:grid-cols-1'} gap-6`}>
-                    <div className="space-y-4">
-                      <Lead
-                        lead={lead}
-                        onUpdateStatus={handleConfirmStatus}
-                        disabledConfirm={!lead.responsavel}
-                      />
-
-                      <div className="pt-4 border-t border-gray-100 mt-4">
-                        {lead.responsavel && responsavel ? (
-                          <div className="flex items-center gap-3">
-                            <p className="text-base text-green-600 font-semibold">
-                              Transferido para <strong className="font-extrabold">{responsavel.nome}</strong>
-                            </p>
-                            {isAdmin && (
-                              <button
-                                onClick={() => handleAlterar(lead.id)}
-                                className="px-3 py-1 bg-yellow-400 text-gray-900 text-sm rounded-md hover:bg-yellow-500 transition duration-150 shadow-sm"
-                              >
-                                Alterar
-                              </button>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-3">
-                            <select
-                              value={selecionados[lead.id] || ''}
-                              onChange={(e) => handleSelect(lead.id, e.target.value)}
-                              className="p-2 border border-gray-300 rounded-md text-sm shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
-                            >
-                              <option value="">Selecione usuário ativo</option>
-                              {usuariosAtivos.map((u) => (
-                                <option key={u.id} value={u.id}>
-                                  {u.nome}
-                                </option>
-                              ))}
-                            </select>
-                            <button
-                              onClick={() => handleEnviar(lead.id)}
-                              className="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition duration-150 shadow-md whitespace-nowrap"
-                            >
-                              Enviar
-                            </button>
-                          </div>
+                  {isSeguradoraPreenchida ? (
+                    // LAYOUT DE LEAD FECHADO
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {/* COLUNA 1: Informações do Lead */}
+                      <div className="col-span-1 border-b pb-4 lg:border-r lg:pb-0 lg:pr-6">
+                        <h3 className="text-xl font-bold text-gray-900 mb-2">{lead.Nome || lead.name}</h3>
+                        <div className="space-y-1 text-sm text-gray-700">
+                          <p><strong>Modelo:</strong> {lead.Modelo || lead.vehicleModel}</p>
+                          <p><strong>Ano/Modelo:</strong> {lead.AnoModelo || lead.vehicleYearModel}</p>
+                          <p><strong>Cidade:</strong> {lead.Cidade || lead.city}</p>
+                          <p><strong>Telefone:</strong> {lead.Telefone || lead.phone}</p>
+                          <p><strong>Tipo de Seguro:</strong> {lead.TipoSeguro || lead.insuranceType}</p>
+                        </div>
+                        {responsavel && (
+                          <p className="mt-4 text-sm font-semibold text-green-600 bg-green-50 p-2 rounded-lg">
+                            Transferido para: <strong>{responsavel.nome}</strong>
+                          </p>
                         )}
+                      </div>
+
+                      {/* COLUNA 2: Detalhes do Fechamento */}
+                      <div className="col-span-1 border-b pb-4 lg:border-r lg:pb-0 lg:px-6">
+                        <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center">
+                          <DollarSign size={18} className="mr-2 text-green-500" />
+                          Detalhes do Fechamento
+                        </h3>
+                        <div className="space-y-2 text-sm text-gray-700">
+                          <p><strong>Seguradora:</strong> {lead.Seguradora}</p>
+                          <p><strong>Meio de Pagamento:</strong> {lead.MeioPagamento}</p>
+                          {lead.MeioPagamento === 'CP' && <p><strong>Cartão Porto Novo:</strong> {lead.CartaoPortoNovo}</p>}
+                          <p><strong>Prêmio Líquido:</strong> {lead.PremioLiquido}</p>
+                          <p><strong>Comissão:</strong> {lead.Comissao}</p>
+                          <p><strong>Parcelamento:</strong> {lead.Parcelamento}</p>
+                        </div>
+                      </div>
+
+                      {/* COLUNA 3: Vigência e Botão de Concluído */}
+                      <div className="col-span-1 lg:pl-6">
+                        <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center">
+                          <Calendar size={18} className="mr-2 text-green-500" />
+                          Vigência
+                        </h3>
+                        <div className="space-y-2 text-sm text-gray-700 mb-6">
+                          <p><strong>Início:</strong> {formatarData(lead.VigenciaInicial)}</p>
+                          <p><strong>Término:</strong> {formatarData(lead.VigenciaFinal)}</p>
+                        </div>
+                        <div className="w-full py-3 px-4 rounded-xl font-bold bg-green-100 text-green-700 flex items-center justify-center border border-green-300">
+                          <CheckCircle size={20} className="mr-2" />
+                          Fechado!
+                        </div>
                       </div>
                     </div>
+                  ) : (
+                    // LAYOUT DE LEAD NORMAL
+                    <div className={`grid ${hasObservacaoSection ? 'lg:grid-cols-2' : 'lg:grid-cols-1'} gap-6`}>
+                      <div className="space-y-4">
+                        <Lead
+                          lead={lead}
+                          onUpdateStatus={handleConfirmStatus}
+                          disabledConfirm={!lead.responsavel}
+                        />
 
-                    {hasObservacaoSection && (
-                      <div className="lg:border-l lg:border-gray-200 lg:pl-6 space-y-3">
-                        <label htmlFor={`observacao-${lead.id}`} className="block text-sm font-semibold text-gray-700">
-                          Observações:
-                        </label>
-                        <textarea
-                          id={`observacao-${lead.id}`}
-                          value={observacoes[lead.id] || ''}
-                          onChange={(e) => handleObservacaoChange(lead.id, e.target.value)}
-                          placeholder="Adicione suas observações aqui..."
-                          rows="3"
-                          disabled={!isEditingObservacao[lead.id]}
-                          className={`
-                            w-full p-3 rounded-lg border text-sm resize-y shadow-sm
-                            ${isEditingObservacao[lead.id] ? 'bg-white border-indigo-500 focus:ring-indigo-500' : 'bg-gray-50 border-gray-200 cursor-not-allowed'}
-                          `}
-                        ></textarea>
-
-                        {isEditingObservacao[lead.id] ? (
-                          <button
-                            onClick={() => handleSalvarObservacao(lead.id)}
-                            className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition duration-150 font-bold shadow-md"
-                          >
-                            Salvar Observação
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleAlterarObservacao(lead.id)}
-                            className="px-4 py-2 bg-yellow-400 text-gray-900 rounded-md hover:bg-yellow-500 transition duration-150 font-bold shadow-md"
-                          >
-                            Alterar Observação
-                          </button>
-                        )}
+                        <div className="pt-4 border-t border-gray-100 mt-4">
+                          {lead.responsavel && responsavel ? (
+                            <div className="flex items-center gap-3">
+                              <p className="text-base text-green-600 font-semibold">
+                                Transferido para <strong className="font-extrabold">{responsavel.nome}</strong>
+                              </p>
+                              {isAdmin && (
+                                <button
+                                  onClick={() => handleAlterar(lead.id)}
+                                  className="px-3 py-1 bg-yellow-400 text-gray-900 text-sm rounded-md hover:bg-yellow-500 transition duration-150 shadow-sm"
+                                >
+                                  Alterar
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-3">
+                              <select
+                                value={selecionados[lead.id] || ''}
+                                onChange={(e) => handleSelect(lead.id, e.target.value)}
+                                className="p-2 border border-gray-300 rounded-md text-sm shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
+                              >
+                                <option value="">Selecione usuário ativo</option>
+                                {usuariosAtivos.map((u) => (
+                                  <option key={u.id} value={u.id}>
+                                    {u.nome}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                onClick={() => handleEnviar(lead.id)}
+                                className="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition duration-150 shadow-md whitespace-nowrap"
+                              >
+                                Enviar
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    )}
-                  </div>
+
+                      {hasObservacaoSection && (
+                        <div className="lg:border-l lg:border-gray-200 lg:pl-6 space-y-3">
+                          <label htmlFor={`observacao-${lead.id}`} className="block text-sm font-semibold text-gray-700">
+                            Observações:
+                          </label>
+                          <textarea
+                            id={`observacao-${lead.id}`}
+                            value={observacoes[lead.id] || ''}
+                            onChange={(e) => handleObservacaoChange(lead.id, e.target.value)}
+                            placeholder="Adicione suas observações aqui..."
+                            rows="3"
+                            disabled={!isEditingObservacao[lead.id]}
+                            className={`
+                              w-full p-3 rounded-lg border text-sm resize-y shadow-sm
+                              ${isEditingObservacao[lead.id] ? 'bg-white border-indigo-500 focus:ring-indigo-500' : 'bg-gray-50 border-gray-200 cursor-not-allowed'}
+                            `}
+                          ></textarea>
+
+                          {isEditingObservacao[lead.id] ? (
+                            <button
+                              onClick={() => handleSalvarObservacao(lead.id)}
+                              className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition duration-150 font-bold shadow-md"
+                            >
+                              Salvar Observação
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleAlterarObservacao(lead.id)}
+                              className="px-4 py-2 bg-yellow-400 text-gray-900 rounded-md hover:bg-yellow-500 transition duration-150 font-bold shadow-md"
+                            >
+                              Alterar Observação
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div
                     className="absolute bottom-2 right-4 text-xs text-gray-400 italic"
@@ -1292,7 +1350,17 @@ const Leads = ({
                 <label className="block text-sm font-semibold text-gray-700">Seguradora</label>
                 <select
                   value={modalSeguradora}
-                  onChange={(e) => setModalSeguradora(e.target.value)}
+                  onChange={(e) => {
+                    setModalSeguradora(e.target.value);
+                    // se mudar para CP inicia Cartao como 'Não' por padrão
+                    if (e.target.value === 'CP' && (!modalCartaoPortoNovo || modalCartaoPortoNovo === '')) {
+                      setModalCartaoPortoNovo('Não');
+                    }
+                    // se tirar CP, limpa CartaoPortoNovo
+                    if (e.target.value !== 'CP') {
+                      setModalCartaoPortoNovo('Não');
+                    }
+                  }}
                   className="mt-1 w-full p-2 border rounded text-sm"
                 >
                   {seguradoraOptions.map((opt) => (
