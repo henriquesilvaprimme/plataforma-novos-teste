@@ -1,9 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Eye, EyeOff, RefreshCcw } from 'lucide-react';
-
-// Certifique-se de que esta URL é a da SUA ÚLTIMA IMPLANTAÇÃO do Apps Script.
-// Ela deve ser a mesma URL base usada para as requisições POST/GET.
-const GOOGLE_SHEETS_BASE_URL = '/api/gas'; // <-- ATUALIZE ESTA LINHA COM A URL REAL DA SUA IMPLANTAÇÃO
+import { db } from '../firebase';
+import {
+  collection,
+  getDocs,
+  onSnapshot,
+  doc,
+  updateDoc,
+  serverTimestamp,
+} from 'firebase/firestore';
 
 const GerenciarUsuarios = () => {
   const [usuarios, setUsuarios] = useState([]);
@@ -12,101 +17,128 @@ const GerenciarUsuarios = () => {
   const [senhaVisivel, setSenhaVisivel] = useState({});
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const fetchUsuariosFromSheet = async () => {
+  const normalizeUser = (docId, data = {}) => {
+    return {
+      id: String(docId),
+      usuario: data.usuario ?? data.login ?? data.user ?? '',
+      nome: data.nome ?? data.name ?? '',
+      email: data.email ?? '',
+      senha: data.senha ?? data.password ?? '',
+      status: data.status ?? 'Ativo',
+      tipo: data.tipo ?? data.type ?? 'Usuario',
+      // mantém todos os dados brutos caso precise
+      ...data,
+    };
+  };
+
+  // listener em tempo real
+  useEffect(() => {
+    setLoading(true);
     setError(null);
+
     try {
-      const response = await fetch(`${GOOGLE_SHEETS_BASE_URL}?v=pegar_usuario`);
+      const collRef = collection(db, 'usuarios');
+      const unsub = onSnapshot(
+        collRef,
+        (snapshot) => {
+          const lista = snapshot.docs.map((d) => normalizeUser(d.id, d.data()));
 
-      if (!response.ok) {
-        throw new Error(`Erro HTTP: ${response.status} - ${response.statusText}`);
-      }
+          // opcional: ordena por id (ou outro campo) — aqui por nome
+          lista.sort((a, b) => {
+            const na = (a.nome || '').toLowerCase();
+            const nb = (b.nome || '').toLowerCase();
+            return na.localeCompare(nb);
+          });
 
-      const data = await response.json();
+          setUsuarios(lista);
+          setLoading(false);
+          setIsRefreshing(false);
+        },
+        (err) => {
+          console.error('Erro no listener de usuarios:', err);
+          setError('Erro ao carregar usuários. Tente novamente mais tarde.');
+          setLoading(false);
+          setIsRefreshing(false);
+        }
+      );
 
-      if (Array.isArray(data)) {
-        const formattedUsuarios = data.map((item) => ({
-          id: item.id || '',
-          usuario: item.usuario || '',
-          nome: item.nome || '',
-          email: item.email || '',
-          senha: item.senha || '',
-          status: item.status || 'Ativo',
-          tipo: item.tipo || 'Usuario',
-        }));
-        setUsuarios(formattedUsuarios);
-      } else {
-        console.warn('Dados recebidos não são um array:', data);
-        setUsuarios([]);
-      }
+      return () => unsub();
     } catch (err) {
-      console.error('Erro ao buscar usuários do Google Sheets:', err);
+      console.error('Erro ao iniciar listener de usuarios:', err);
+      setError('Erro ao carregar usuários. Tente novamente mais tarde.');
+      setLoading(false);
+      setIsRefreshing(false);
+    }
+  }, []);
+
+  // fetch manual (para o botão de refresh)
+  const fetchUsuariosFromFirebase = async () => {
+    setError(null);
+    setIsRefreshing(true);
+    try {
+      const querySnapshot = await getDocs(collection(db, 'usuarios'));
+      const lista = [];
+      querySnapshot.forEach((docSnap) => {
+        lista.push(normalizeUser(docSnap.id, docSnap.data()));
+      });
+
+      lista.sort((a, b) => {
+        const na = (a.nome || '').toLowerCase();
+        const nb = (b.nome || '').toLowerCase();
+        return na.localeCompare(nb);
+      });
+
+      setUsuarios(lista);
+    } catch (err) {
+      console.error('Erro ao buscar usuários do Firebase:', err);
       setError('Erro ao carregar usuários. Tente novamente mais tarde.');
       setUsuarios([]);
     } finally {
-      setLoading(false);
       setIsRefreshing(false);
+      setLoading(false);
     }
   };
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await fetchUsuariosFromSheet();
+    await fetchUsuariosFromFirebase();
   };
 
-  useEffect(() => {
-    setLoading(true);
-    fetchUsuariosFromSheet();
-
-    const interval = setInterval(() => {
-      console.log('Atualizando lista de usuários automaticamente...');
-      fetchUsuariosFromSheet();
-    }, 60000);
-
-    return () => clearInterval(interval);
-  }, []);
-
+  // Atualiza status/tipo do usuário (usa updateDoc no Firebase)
   const atualizarStatusUsuario = async (id, novoStatus = null, novoTipo = null) => {
-    const usuarioParaAtualizarIndex = usuarios.findIndex((u) => String(u.id) === String(id));
-    if (usuarioParaAtualizarIndex === -1) {
+    const usuarioIndex = usuarios.findIndex((u) => String(u.id) === String(id));
+    if (usuarioIndex === -1) {
       console.warn(`Usuário com ID ${id} não encontrado localmente para atualização.`);
       return;
     }
 
-    const usuarioAtual = usuarios[usuarioParaAtualizarIndex];
+    const usuarioAtual = usuarios[usuarioIndex];
     const novoEstadoUsuario = { ...usuarioAtual };
-
     if (novoStatus !== null) novoEstadoUsuario.status = novoStatus;
     if (novoTipo !== null) novoEstadoUsuario.tipo = novoTipo;
 
-    // --- ATUALIZAÇÃO OTIMISTA: Atualiza o estado local IMEDIATAMENTE ---
+    // Atualização otimista local
     setUsuarios((prev) =>
-      prev.map((u, index) =>
-        index === usuarioParaAtualizarIndex
-          ? novoEstadoUsuario
-          : u
-      )
+      prev.map((u, idx) => (idx === usuarioIndex ? novoEstadoUsuario : u))
     );
-    // ------------------------------------------------------------------
 
     try {
-      console.log('Enviando solicitação de atualização para Apps Script:', novoEstadoUsuario);
+      const userRef = doc(db, 'usuarios', String(id));
+      const dataToUpdate = {};
+      if (novoStatus !== null) dataToUpdate.status = novoStatus;
+      if (novoTipo !== null) dataToUpdate.tipo = novoTipo;
+      dataToUpdate.updatedAt = serverTimestamp();
 
-      await fetch(`${GOOGLE_SHEETS_BASE_URL}?v=alterar_usuario`, {
-        method: 'POST',
-        body: JSON.stringify({ usuario: novoEstadoUsuario }),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-
-      console.log('Solicitação de atualização para o usuário enviada ao Apps Script (modo no-cors).');
-      console.log('Por favor, verifique os logs de execução do Google Apps Script para confirmação de sucesso e possíveis erros.');
-
+      await updateDoc(userRef, dataToUpdate);
+      // sucesso — o listener onSnapshot manterá tudo sincronizado
     } catch (err) {
-      console.error('Erro ao enviar atualização de usuário para o Apps Script:', err);
+      console.error('Erro ao atualizar usuário no Firebase:', err);
       alert('Erro ao atualizar usuário. Por favor, tente novamente.');
-      // Opcional: Aqui você pode reverter a alteração no estado local se a API falhar
-      // setUsuarios(prev => prev.map((u, index) => index === usuarioParaAtualizarIndex ? usuarioAtual : u));
+
+      // Reverte a alteração local em caso de erro
+      setUsuarios((prev) =>
+        prev.map((u, idx) => (idx === usuarioIndex ? usuarioAtual : u))
+      );
     }
   };
 
