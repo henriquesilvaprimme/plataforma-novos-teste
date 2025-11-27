@@ -181,91 +181,6 @@ const Leads = ({
     }
   };
 
-  // Move lead para leadsFechados (mantive a função antiga caso queira usar)
-  const moveLeadToClosed = async (leadId, leadData = {}) => {
-    try {
-      const nomeVal =
-        leadData.Nome ??
-        leadData.nome ??
-        leadData.Name ??
-        leadData.name ??
-        '';
-
-      const modeloVal =
-        leadData.Modelo ??
-        leadData.modelo ??
-        leadData['Modelo do Veículo'] ??
-        leadData['modelo do veículo'] ??
-        leadData.modeloVeiculo ??
-        leadData.vehicleModel ??
-        leadData.model ??
-        '';
-
-      const anoModeloVal =
-        leadData.AnoModelo ??
-        leadData.anoModelo ??
-        leadData.Ano ??
-        leadData.ano ??
-        leadData.vehicleYearModel ??
-        '';
-
-      const cidadeVal =
-        leadData.Cidade ?? leadData.cidade ?? leadData.city ?? '';
-
-      const telefoneVal =
-        leadData.Telefone ?? leadData.telefone ?? leadData.phone ?? '';
-
-      const tipoSeguroVal =
-        leadData.TipoSeguro ??
-        leadData.tipoSeguro ??
-        leadData.insuranceType ??
-        '';
-
-      const payload = {
-        ID: leadData.ID ?? leadData.id ?? String(leadId),
-        id: String(leadId),
-        Nome: nomeVal,
-        Modelo: modeloVal,
-        AnoModelo: anoModeloVal,
-        Cidade: cidadeVal,
-        Telefone: telefoneVal,
-        TipoSeguro: tipoSeguroVal,
-        usuarioId: leadData.usuarioId ?? null,
-        Seguradora: '',
-        MeioPagamento: '',
-        CartaoPortoNovo: '',
-        PremioLiquido: '',
-        Comissao: '',
-        Parcelamento: '',
-        VigenciaInicial: '',
-        VigenciaFinal: '',
-        Status: leadData.status ?? leadData.Status ?? 'Fechado',
-        Observacao: leadData.observacao ?? leadData.Observacao ?? '',
-        Responsavel: leadData.responsavel ?? leadData.Responsavel ?? '',
-        Data: leadData.Data ?? formatDDMMYYYYFromISO(leadData.createdAt) ?? '',
-        createdAt: leadData.createdAt ?? null,
-        closedAt: serverTimestamp(),
-      };
-
-      const closedRef = doc(db, 'leadsFechados', String(leadId));
-      await setDoc(closedRef, payload);
-
-      const originalRef = doc(db, 'leads', String(leadId));
-      const updatePayload = {
-        closed: true,
-        closedAt: serverTimestamp(),
-        status: payload.Status ?? 'Fechado',
-      };
-      await updateDoc(originalRef, updatePayload);
-
-      console.log(
-        `Lead ${leadId} copiado para leadsFechados (via moveLeadToClosed) e marcado como closed no leads.`
-      );
-    } catch (err) {
-      console.error('Erro ao mover/marcar lead como fechado (moveLeadToClosed):', err);
-    }
-  };
-
   // Listener em tempo real para leads
   useEffect(() => {
     setIsLoading(true);
@@ -419,13 +334,14 @@ const Leads = ({
     let emContatoCount = 0;
     let semContatoCount = 0;
     let agendadosCount = 0;
-    let todosCount = 0;
+    let todosPendentesCount = 0; // Renomeado para maior clareza
     const today = new Date().toLocaleDateString('pt-BR');
 
     visibleLeads.forEach((lead) => {
       const s = lead.status ?? '';
+      // Apenas leads que não estão 'Fechado' ou 'Perdido' são considerados pendentes
       if (s !== 'Fechado' && s !== 'Perdido') {
-        todosCount++;
+        todosPendentesCount++;
       }
 
       if (s === 'Em Contato') {
@@ -448,7 +364,7 @@ const Leads = ({
       emContato: emContatoCount,
       semContato: semContatoCount,
       agendadosHoje: agendadosCount,
-      todosPendentes: todosCount,
+      todosPendentes: todosPendentesCount, // Usar a nova contagem
     };
   }, [leadsData, usuarioLogado]); // recalcula quando leadsData ou usuarioLogado mudar
 
@@ -510,9 +426,10 @@ const Leads = ({
     .filter((lead) => canViewLead(lead))
     .filter((lead) => {
       const s = lead.status ?? '';
-      // Leads Fechados e Perdidos não aparecem nesta lista, a menos que seja um filtro específico
-      if (s === 'Fechado' || s === 'Perdido') return false;
+      // Leads 'Perdido' não aparecem nesta lista
+      if (s === 'Perdido') return false;
 
+      // Se houver filtro de status, aplica
       if (filtroStatus) {
         if (filtroStatus === 'Agendado') {
           const today = new Date();
@@ -524,18 +441,26 @@ const Leads = ({
           const statusDateFormatted = statusDate.toLocaleDateString('pt-BR');
           return isStatusAgendado(lead.status) && statusDateFormatted === todayFormatted;
         }
+        // Se o filtro for 'Fechado', mostra apenas leads fechados
+        if (filtroStatus === 'Fechado') {
+          return s === 'Fechado';
+        }
+        // Para outros status, mostra leads com o status correspondente
         return lead.status === filtroStatus;
       }
 
+      // Se houver filtro de data, aplica
       if (filtroData) {
         const leadMesAno = lead.createdAt ? String(lead.createdAt).substring(0, 7) : '';
         return leadMesAno === filtroData;
       }
 
+      // Se houver filtro de nome, aplica
       if (filtroNome) {
         return nomeContemFiltro(lead.Nome || lead.name || lead.nome, filtroNome);
       }
 
+      // Por padrão, mostra todos os leads que não são 'Perdido'
       return true;
     });
 
@@ -879,45 +804,35 @@ const Leads = ({
       const vigIniISO = modalVigenciaInicial ? new Date(`${modalVigenciaInicial}T00:00:00`).toISOString() : '';
       const vigFinISO = modalVigenciaFinal ? new Date(`${modalVigenciaFinal}T00:00:00`).toISOString() : '';
 
-      // Monta payload para leadsFechados (campos em português conforme pedido)
-      const payload = {
-        ID: closingLead.ID ?? closingLead.id ?? leadId,
-        id: leadId,
-        Nome: modalNome,
-        name: modalNome,
-        Modelo: closingLead.Modelo ?? closingLead.vehicleModel ?? '',
-        AnoModelo: closingLead.AnoModelo ?? closingLead.vehicleYearModel ?? '',
-        Cidade: closingLead.Cidade ?? closingLead.city ?? '',
-        Telefone: closingLead.Telefone ?? closingLead.phone ?? '',
-        TipoSeguro: closingLead.TipoSeguro ?? closingLead.insuranceType ?? '',
-        usuarioId: closingLead.usuarioId ?? null,
-        Seguradora: modalSeguradora || '',
-        MeioPagamento: modalMeioPagamento || '',
-        CartaoPortoNovo: modalMeioPagamento === 'CP' ? (modalCartaoPortoNovo || 'Não') : '',
-        PremioLiquido: modalPremioLiquido || '',
-        Comissao: modalComissao || '',
-        Parcelamento: modalParcelamento || '',
-        VigenciaInicial: vigIniISO || '',
-        VigenciaFinal: vigFinISO || '',
-        Status: 'Fechado',
-        Observacao: closingLead.observacao ?? closingLead.Observacao ?? '',
-        Responsavel: closingLead.responsavel ?? closingLead.Responsavel ?? usuarioLogado?.nome ?? '',
-        Data: closingLead.Data ?? formatDDMMYYYYFromISO(closingLead.createdAt) ?? '',
-        createdAt: closingLead.createdAt ?? null,
-        closedAt: serverTimestamp(),
-      };
-
-      // Salva em leadsFechados com ID fixo igual ao leadId (document id do Firestore)
-      const closedRef = doc(db, 'leadsFechados', leadId);
-      await setDoc(closedRef, payload);
-
       // --- NOVO: grava também em 'renovacoes' (mesmo payload, mesmo doc id) ---
       try {
         const renovRef = doc(db, 'renovacoes', leadId);
         const renovPayload = {
-          ...payload,
-          // garante que existam timestamps próprios para renovacoes (se quiser rastrear)
-          registeredAt: serverTimestamp(),
+          ID: closingLead.ID ?? closingLead.id ?? leadId,
+          id: leadId,
+          Nome: modalNome,
+          name: modalNome,
+          Modelo: closingLead.Modelo ?? closingLead.vehicleModel ?? '',
+          AnoModelo: closingLead.AnoModelo ?? closingLead.vehicleYearModel ?? '',
+          Cidade: closingLead.Cidade ?? closingLead.city ?? '',
+          Telefone: closingLead.Telefone ?? closingLead.phone ?? '',
+          TipoSeguro: closingLead.TipoSeguro ?? closingLead.insuranceType ?? '',
+          usuarioId: closingLead.usuarioId ?? null,
+          Seguradora: modalSeguradora || '',
+          MeioPagamento: modalMeioPagamento || '',
+          CartaoPortoNovo: modalMeioPagamento === 'CP' ? (modalCartaoPortoNovo || 'Não') : '',
+          PremioLiquido: modalPremioLiquido || '',
+          Comissao: modalComissao || '',
+          Parcelamento: modalParcelamento || '',
+          VigenciaInicial: vigIniISO || '',
+          VigenciaFinal: vigFinISO || '',
+          Status: 'Fechado',
+          Observacao: closingLead.observacao ?? closingLead.Observacao ?? '',
+          Responsavel: closingLead.responsavel ?? closingLead.Responsavel ?? usuarioLogado?.nome ?? '',
+          Data: closingLead.Data ?? formatDDMMYYYYFromISO(closingLead.createdAt) ?? '',
+          createdAt: closingLead.createdAt ?? null,
+          closedAt: serverTimestamp(),
+          registeredAt: serverTimestamp(), // Timestamp específico para renovacoes
         };
         await setDoc(renovRef, renovPayload);
       } catch (errRenov) {
@@ -969,7 +884,7 @@ const Leads = ({
 
       // sucesso: fecha modal e deixa o listener atualizar a lista automaticamente
       closeClosingModal();
-      alert('Venda concluída e registrada em leadsFechados com sucesso.');
+      alert('Venda concluída e registrada com sucesso.');
     } catch (err) {
       console.error('Erro ao concluir venda:', err);
       alert('Erro ao concluir venda. Veja o console para detalhes.');
@@ -1117,6 +1032,16 @@ const Leads = ({
             Agendados <span className="text-sm font-extrabold ml-1">({contagens.agendadosHoje})</span>
           </button>
         )}
+
+        <button
+          onClick={() => aplicarFiltroStatus('Fechado')}
+          className={`
+            px-5 py-2 rounded-full font-bold transition duração-300 shadow-lg
+            ${filtroStatus === 'Fechado' ? 'bg-green-700 text-white ring-2 ring-green-400' : 'bg-green-500 text-white hover:bg-green-600'}
+          `}
+        >
+          Fechados
+        </button>
 
         <button
           onClick={() => aplicarFiltroStatus(null)}
