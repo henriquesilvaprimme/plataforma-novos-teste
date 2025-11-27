@@ -484,7 +484,7 @@ const Dashboard = ({ usuarioLogado }) => {
         <>
           {/* Seção de Seguros Novos */}
           <h2 style={{ marginTop: '40px', marginBottom: '15px', fontSize: '24px', fontWeight: 'bold', color: '#333', borderBottom: '2px solid #eee', paddingBottom: '10px' }}>Seguros Novos</h2>
-          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-start', gap: '10px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-around', gap: '10px' }}>
             <div style={{ ...boxStyle, backgroundColor: '#424242' }}>
               <h3 style={titleStyle}>Total de Leads</h3>
               <p style={valueStyle}>{dashboardStats.totalLeads}</p>
@@ -511,7 +511,7 @@ const Dashboard = ({ usuarioLogado }) => {
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-start', gap: '10px', marginTop: '20px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-around', gap: '10px', marginTop: '20px' }}>
             <div style={{ ...boxStyle, backgroundColor: '#003366' }}>
               <h3 style={titleStyle}>Porto Seguro</h3>
               <p style={valueStyle}>{dashboardStats.portoSeguroLeads}</p>
@@ -530,7 +530,7 @@ const Dashboard = ({ usuarioLogado }) => {
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-start', gap: '10px', marginTop: '20px', marginBottom: '40px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-around', gap: '10px', marginTop: '20px', marginBottom: '40px' }}>
             <div style={{ ...boxStyle, backgroundColor: '#3f51b5' }}>
               <h3 style={titleStyle}>Total Prêmio Líquido</h3>
               <p style={valueStyle}>
@@ -551,7 +551,7 @@ const Dashboard = ({ usuarioLogado }) => {
 
           {/* Seção de Renovações */}
           <h2 style={{ marginTop: '40px', marginBottom: '15px', fontSize: '24px', fontWeight: 'bold', color: '#333', borderBottom: '2px solid #eee', paddingBottom: '10px' }}>Renovações</h2>
-          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-start', gap: '10px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-around', gap: '10px' }}>
             <div style={{ ...boxStyle, backgroundColor: '#673AB7' }}>
               <h3 style={titleStyle}>Total de Renovações</h3>
               <p style={valueStyle}>{dashboardStats.totalRenovacoes}</p>
@@ -570,7 +570,7 @@ const Dashboard = ({ usuarioLogado }) => {
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-start', gap: '10px', marginTop: '20px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-around', gap: '10px', marginTop: '20px' }}>
             <div style={{ ...boxStyle, backgroundColor: '#003366' }}>
               <h3 style={titleStyle}>Porto Seguro Renov.</h3>
               <p style={valueStyle}>{dashboardStats.portoSeguroRenovacoes}</p>
@@ -589,7 +589,7 @@ const Dashboard = ({ usuarioLogado }) => {
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-start', gap: '10px', marginTop: '20px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-around', gap: '10px', marginTop: '20px' }}>
             <div style={{ ...boxStyle, backgroundColor: '#00BCD4' }}>
               <h3 style={titleStyle}>Prêmio Líquido Renovados</h3>
               <p style={valueStyle}>
