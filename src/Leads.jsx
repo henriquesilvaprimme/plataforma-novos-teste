@@ -24,7 +24,7 @@ const Leads = ({
   const [selecionados, setSelecionados] = useState({});
   const [paginaAtual, setPaginaAtual] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
-  const [observacoes, setObservacoes] = useState({});
+  const [observacoes, setObservacoes] = {};
   const [isEditingObservacao, setIsEditingObservacao] = useState({});
   const [dataInput, setDataInput] = useState('');
   const [filtroData, setFiltroData] = useState('');
@@ -445,7 +445,7 @@ const Leads = ({
         if (filtroStatus === 'Agendado') {
           const today = new Date();
           const todayFormatted = today.toLocaleDateString('pt-BR');
-          const statusDateStr = extractStatusDate(lead.status);
+          const statusDateStr = extractStatusDate(s);
           if (!statusDateStr) return false;
           const [dia, mes, ano] = statusDateStr.split('/');
           const statusDate = new Date(`${ano}-${mes}-${dia}T00:00:00`);
@@ -829,7 +829,8 @@ const Leads = ({
           Observacao: closingLead.observacao ?? closingLead.Observacao ?? '',
           Responsavel: closingLead.responsavel ?? closingLead.Responsavel ?? usuarioLogado?.nome ?? '',
           Data: closingLead.Data ?? formatDDMMYYYYFromISO(closingLead.createdAt) ?? '',
-          createdAt: closingLead.createdAt ?? null,
+          // MODIFICAÇÃO AQUI: createdAt com a data atual + 1 ano
+          createdAt: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString(),
           closedAt: serverTimestamp(),
           registeredAt: serverTimestamp(), // Timestamp específico para renovacoes
         };
