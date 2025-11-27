@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { RefreshCcw, Search, CheckCircle, DollarSign, Calendar } from 'lucide-react';
-import { collection, onSnapshot, query, orderBy, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, getDocs, where } from 'firebase/firestore';
 import { db } from './firebase';
 
 // ===============================================
@@ -319,25 +319,236 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
     };
 
     // --- Listener em tempo real para leadsFechados no Firestore ---
+    // Observação: agora criamos listeners diferenciados para admin / usuário não-admin
     useEffect(() => {
         setIsLoading(true);
-        try {
-            const q = query(collection(db, 'leadsFechados'), orderBy('closedAt', 'desc'));
-            const unsub = onSnapshot(q, (snapshot) => {
-                const lista = snapshot.docs.map(d => normalizeClosedLead(d.id, d.data()));
-                setLeadsFromFirebase(lista);
-                setIsLoading(false);
-            }, (err) => {
-                console.error('Erro no listener leadsFechados:', err);
-                setIsLoading(false);
-            });
 
-            return () => unsub();
-        } catch (err) {
-            console.error('Erro ao iniciar listener leadsFechados:', err);
-            setIsLoading(false);
-        }
-    }, []);
+        // Helper para obter user do localStorage (raw)
+        const getCurrentUserFromStorage = () => {
+            try {
+                const raw = localStorage.getItem('user');
+                if (!raw) return null;
+                return JSON.parse(raw);
+            } catch (e) {
+                return null;
+            }
+        };
+
+        // Retorna o usuário "resolvido" preferencialmente a partir da lista usuariosFromFirebase (se disponível),
+        // senão a partir de localStorage.
+        const getResolvedLoggedUserLocal = () => {
+            const stored = getCurrentUserFromStorage();
+            if (!stored) return null;
+
+            const storedId = String(stored.id ?? stored.ID ?? stored.userId ?? stored.uid ?? '').trim();
+            const storedLogin = String(stored.usuario ?? stored.user ?? stored.login ?? stored.email ?? '').trim();
+            const storedNome = String(stored.nome ?? stored.name ?? '').trim();
+
+            // Preferir buscar na lista carregada do Firestore
+            if (Array.isArray(usuariosFromFirebase) && usuariosFromFirebase.length > 0) {
+                // 1) por id exato
+                if (storedId) {
+                    const found = usuariosFromFirebase.find(u => {
+                        const uid = String(u.id ?? u.ID ?? u.userId ?? u.uid ?? '').trim();
+                        return uid && uid === storedId;
+                    });
+                    if (found) return found;
+                }
+
+                // 2) por login/email/usuario
+                if (storedLogin) {
+                    const foundLogin = usuariosFromFirebase.find(u => {
+                        const uLogin = String(u.usuario ?? u.user ?? u.email ?? '').trim();
+                        return uLogin && uLogin === storedLogin;
+                    });
+                    if (foundLogin) return foundLogin;
+                }
+
+                // 3) por nome (não normalizado)
+                if (storedNome) {
+                    const foundNome = usuariosFromFirebase.find(u => {
+                        const uNome = String(u.nome ?? '').trim();
+                        return uNome && uNome === storedNome;
+                    });
+                    if (foundNome) return foundNome;
+                }
+            }
+
+            // fallback: retorna o objeto do localStorage (possivelmente com id/nome/login)
+            return stored;
+        };
+
+        // Criar listeners dependendo se é admin ou não
+        const unsubscribers = [];
+        let mounted = true;
+
+        (async () => {
+            try {
+                if (isAdmin) {
+                    // admin vê tudo
+                    const qAll = query(collection(db, 'leadsFechados'), orderBy('closedAt', 'desc'));
+                    const unsub = onSnapshot(qAll, (snapshot) => {
+                        if (!mounted) return;
+                        const lista = snapshot.docs.map(d => normalizeClosedLead(d.id, d.data()));
+                        setLeadsFromFirebase(lista);
+                        setIsLoading(false);
+                    }, (err) => {
+                        console.error('Erro no listener leadsFechados (admin):', err);
+                        setIsLoading(false);
+                    });
+                    unsubscribers.push(unsub);
+                } else {
+                    // Resolve usuário (a partir de usuariosFromFirebase preferencialmente)
+                    const resolved = getResolvedLoggedUserLocal();
+                    const userId = String(resolved?.id ?? resolved?.ID ?? resolved?.userId ?? resolved?.uid ?? '').trim();
+                    const userName = String(resolved?.nome ?? resolved?.name ?? resolved?.Nome ?? '').trim();
+
+                    // If we don't have either id or name, fallback to localStorage raw fields
+                    const storedRaw = getCurrentUserFromStorage();
+                    const fallbackId = String(storedRaw?.id ?? storedRaw?.ID ?? storedRaw?.userId ?? storedRaw?.uid ?? '').trim();
+                    const fallbackName = String(storedRaw?.nome ?? storedRaw?.name ?? '').trim();
+
+                    const finalUserId = userId || fallbackId || '';
+                    const finalUserName = (userName || fallbackName || '').trim();
+
+                    // shared map to dedupe across multiple query snapshots
+                    const sharedDocs = new Map();
+
+                    // helper to apply snapshot to sharedMap and set state
+                    const applySnapshotToShared = (snapshot) => {
+                        snapshot.docs.forEach(doc => {
+                            sharedDocs.set(String(doc.id), normalizeClosedLead(doc.id, doc.data()));
+                        });
+                        // transform to array and sort by closedAt desc (same logic de ordenação simples)
+                        const arr = Array.from(sharedDocs.values()).sort((a, b) => {
+                            const toTime = (lead) => {
+                                if (lead.closedAt && typeof lead.closedAt.toDate === 'function') {
+                                    return lead.closedAt.toDate().getTime();
+                                }
+                                if (lead.closedAt) {
+                                    const d = new Date(lead.closedAt);
+                                    if (!isNaN(d.getTime())) return d.getTime();
+                                }
+                                if (lead.raw?.Data) {
+                                    const iso = getDataParaComparacao(lead.raw?.Data);
+                                    if (iso) {
+                                        const d = new Date(iso + 'T00:00:00');
+                                        if (!isNaN(d.getTime())) return d.getTime();
+                                    }
+                                }
+                                if (lead.createdAt && typeof lead.createdAt.toDate === 'function') {
+                                    return lead.createdAt.toDate().getTime();
+                                }
+                                if (lead.createdAt) {
+                                    const d = new Date(lead.createdAt);
+                                    if (!isNaN(d.getTime())) return d.getTime();
+                                }
+                                return 0;
+                            };
+                            return toTime(b) - toTime(a);
+                        });
+                        if (mounted) {
+                            setLeadsFromFirebase(arr);
+                            setIsLoading(false);
+                        }
+                    };
+
+                    // Query 1: por usuarioId (se tivermos)
+                    if (finalUserId) {
+                        try {
+                            const qByUserId = query(collection(db, 'leadsFechados'), where('usuarioId', '==', finalUserId), orderBy('closedAt', 'desc'));
+                            const unsub1 = onSnapshot(qByUserId, (snapshot) => {
+                                applySnapshotToShared(snapshot);
+                            }, (err) => {
+                                console.error('Erro listener leadsFechados por usuarioId:', err);
+                            });
+                            unsubscribers.push(unsub1);
+                        } catch (err) {
+                            // Em alguns indexes/constraints orderBy+where pode exigir index — como fallback fazemos getDocs simples sem orderBy
+                            try {
+                                const qByUserIdFallback = query(collection(db, 'leadsFechados'), where('usuarioId', '==', finalUserId));
+                                const unsub1b = onSnapshot(qByUserIdFallback, (snapshot) => {
+                                    applySnapshotToShared(snapshot);
+                                }, (err) => {
+                                    console.error('Erro listener fallback leadsFechados por usuarioId:', err);
+                                });
+                                unsubscribers.push(unsub1b);
+                            } catch (e) {
+                                console.error('Erro criando query por usuarioId (fallback):', e);
+                            }
+                        }
+                    }
+
+                    // Query 2: por Responsavel (campo 'Responsavel') se tivermos nome
+                    if (finalUserName) {
+                        try {
+                            const qByResp = query(collection(db, 'leadsFechados'), where('Responsavel', '==', finalUserName), orderBy('closedAt', 'desc'));
+                            const unsub2 = onSnapshot(qByResp, (snapshot) => {
+                                applySnapshotToShared(snapshot);
+                            }, (err) => {
+                                console.error('Erro listener leadsFechados por Responsavel:', err);
+                            });
+                            unsubscribers.push(unsub2);
+                        } catch (err) {
+                            // fallback sem orderBy
+                            try {
+                                const qByRespFb = query(collection(db, 'leadsFechados'), where('Responsavel', '==', finalUserName));
+                                const unsub2b = onSnapshot(qByRespFb, (snapshot) => {
+                                    applySnapshotToShared(snapshot);
+                                }, (err) => {
+                                    console.error('Erro listener fallback leadsFechados por Responsavel:', err);
+                                });
+                                unsubscribers.push(unsub2b);
+                            } catch (e) {
+                                console.error('Erro criando query por Responsavel (fallback):', e);
+                            }
+                        }
+
+                        // Também tentamos variação de campo em minúsculas 'responsavel'
+                        try {
+                            const qByRespLower = query(collection(db, 'leadsFechados'), where('responsavel', '==', finalUserName), orderBy('closedAt', 'desc'));
+                            const unsub3 = onSnapshot(qByRespLower, (snapshot) => {
+                                applySnapshotToShared(snapshot);
+                            }, (err) => {
+                                console.error('Erro listener leadsFechados por responsavel:', err);
+                            });
+                            unsubscribers.push(unsub3);
+                        } catch (err) {
+                            // fallback sem orderBy
+                            try {
+                                const qByRespLowerFb = query(collection(db, 'leadsFechados'), where('responsavel', '==', finalUserName));
+                                const unsub3b = onSnapshot(qByRespLowerFb, (snapshot) => {
+                                    applySnapshotToShared(snapshot);
+                                }, (err) => {
+                                    console.error('Erro listener fallback leadsFechados por responsavel:', err);
+                                });
+                                unsubscribers.push(unsub3b);
+                            } catch (e) {
+                                console.error('Erro criando query por responsavel (fallback):', e);
+                            }
+                        }
+                    }
+
+                    // Caso não tivéssemos nem id nem nome resolvido (usuário não identificado), deixamos lista vazia e isLoading false
+                    if (!finalUserId && !finalUserName) {
+                        setLeadsFromFirebase([]);
+                        setIsLoading(false);
+                    }
+                }
+            } catch (err) {
+                console.error('Erro ao iniciar listeners leadsFechados:', err);
+                setIsLoading(false);
+            }
+        })();
+
+        return () => {
+            // cleanup
+            unsubscribers.forEach(un => {
+                try { un(); } catch (e) { /* ignore */ }
+            });
+            mounted = false;
+        };
+    }, [isAdmin, usuariosFromFirebase]); // re-cria listeners se variáveis mudarem
 
     // Fetch usuarios collection once (to resolve usuarioId / nome / ID matches)
     useEffect(() => {
