@@ -13,7 +13,7 @@ import Ranking from './pages/Ranking';
 import CriarLead from './pages/CriarLead';
 
 import { db } from './firebase';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, onSnapshot, query, orderBy } from 'firebase/firestore';
 
 // Este componente agora vai rolar o elemento com a ref para o topo
 function ScrollToTop({ scrollContainerRef }) {
@@ -31,18 +31,9 @@ function ScrollToTop({ scrollContainerRef }) {
   return null;
 }
 
-const GOOGLE_APPS_SCRIPT_BASE_URL = '/api/gas';
-const GOOGLE_SHEETS_SCRIPT_URL = `${GOOGLE_APPS_SCRIPT_BASE_URL}?v=getLeads`;
-const GOOGLE_SHEETS_LEADS_FECHADOS = `${GOOGLE_APPS_SCRIPT_BASE_URL}?v=pegar_clientes_fechados`;
-const GOOGLE_SHEETS_USERS_AUTH_URL = `${GOOGLE_APPS_SCRIPT_BASE_URL}?v=pegar_usuario`;
-const SALVAR_AGENDAMENTO_SCRIPT_URL = `${GOOGLE_APPS_SCRIPT_BASE_URL}?action=salvarAgendamento`;
-const SALVAR_OBSERVACAO_SCRIPT_URL = `${GOOGLE_APPS_SCRIPT_BASE_URL}`;
-
-// ======= CONFIGURAÇÃO DE SINCRONIZAÇÃO LOCAL =======
+// ======= CONFIGURAÇÃO DE SINCRONIZAÇÃO LOCAL (apenas armazenamento local; sem Sheets) =======
 const LOCAL_CHANGES_KEY = 'leads_local_changes_v1';
-const SYNC_DELAY_MS = 5 * 60 * 1000; // 5 minutos
-const SYNC_CHECK_INTERVAL_MS = 1000; // checa a cada 1s
-// =====================================================
+// ==========================================================================================
 
 function App() {
   const navigate = useNavigate();
@@ -353,142 +344,68 @@ function App() {
     }
   };
 
-  // ------------------ FETCH LEADS (com merge de localChanges) ------------------
-  const applyLocalChangesToFetched = (fetchedLeads) => {
-    const now = Date.now();
-    loadLocalChangesFromStorage();
-
-    // primeiro mapeia fetched para objeto normalizado (garante status sempre string)
-    const normalizedFetched = fetchedLeads.map((f) => normalizeLead(f));
-
-    const merged = normalizedFetched.map(lead => {
-      const matchedChangeKey = Object.keys(localChangesRef.current).find(k => {
-        const ch = localChangesRef.current[k];
-        if (!ch) return false;
-
-        // considerar documentId nas comparações
-        const leadIdMatches = (
-          (ch.leadId && (norm(ch.leadId) === norm(lead.id) || norm(ch.leadId) === norm(lead.ID) || norm(ch.leadId) === norm(lead.documentId))) ||
-          (ch.id && (norm(ch.id) === norm(lead.id) || norm(ch.id) === norm(lead.ID) || norm(ch.id) === norm(lead.documentId))) ||
-          (ch.data && (
-            norm(ch.data.id) === norm(lead.id) ||
-            norm(ch.data.ID) === norm(lead.id) ||
-            norm(ch.data.leadId) === norm(lead.id) ||
-            norm(ch.data.id) === norm(lead.documentId) ||
-            norm(ch.data.ID) === norm(lead.documentId) ||
-            norm(ch.data.leadId) === norm(lead.documentId)
-          ))
-        );
-
-        const phoneMatches = ch.data && ch.data.phone && norm(ch.data.phone) === norm(lead.phone);
-
-        return (leadIdMatches || phoneMatches);
+  // ------------------ FIRESTORE: listeners para leads e leadsFechados ------------------
+  useEffect(() => {
+    // Listener para 'leads' (abertos)
+    try {
+      const qLeads = query(collection(db, 'leads'), orderBy('createdAt', 'desc'));
+      const unsubLeads = onSnapshot(qLeads, (snapshot) => {
+        const arr = snapshot.docs.map(d => normalizeLead({ id: d.id, ...(d.data() || {}) }));
+        setLeads(arr);
+      }, (err) => {
+        console.error('Erro no listener leads:', err);
       });
 
-      if (matchedChangeKey) {
-        const change = localChangesRef.current[matchedChangeKey];
-        if (!change) return lead;
-        if (now - change.timestamp < SYNC_DELAY_MS) {
-          // Fazer merge seguro: não sobrescrever com undefined
-          const mergedLead = mergeWithDefined(lead, change.data || {});
-          // garantir normalização após merge
-          return normalizeLead(mergedLead);
-        }
-      }
-
-      return lead;
-    });
-
-    // Adiciona leads que existem apenas nas localChanges (novos locais) se ainda estiverem no período de hold
-    Object.keys(localChangesRef.current).forEach(k => {
-      const change = localChangesRef.current[k];
-      if (!change) return;
-      if (Date.now() - change.timestamp < SYNC_DELAY_MS) {
-        const exists = merged.some(l =>
-          norm(l.id) === norm(change.leadId) ||
-          (change.data && norm(l.phone) === norm(change.data.phone)) ||
-          norm(l.documentId ?? '') === norm(change.leadId ?? change.data?.documentId ?? '')
-        );
-        if (!exists) {
-          const newLead = normalizeLead({ id: change.leadId || change.id, documentId: change.data?.documentId ?? change.leadId, ...(change.data || {}) });
-          merged.unshift(newLead);
-        }
-      }
-    });
-
-    return merged;
-  };
-
-  const fetchLeadsFromSheet = async () => {
-    try {
-      const response = await fetch(GOOGLE_SHEETS_SCRIPT_URL);
-      const data = await response.json();
-
-      if (Array.isArray(data)) {
-        const formattedLeads = data.map(item => normalizeLead(item));
-
-        // Aplicar merge com alterações locais (se existirem)
-        loadLocalChangesFromStorage();
-        const merged = applyLocalChangesToFetched(formattedLeads);
-
-        if (!leadSelecionado) {
-          setLeads(merged);
-        }
-      } else {
-        if (!leadSelecionado) {
-          setLeads([]);
-        }
-      }
-    } catch (error) {
-      console.error('Erro ao buscar leads da planilha:', error);
-      if (!leadSelecionado) {
-        setLeads([]);
-      }
+      return () => {
+        try { unsubLeads(); } catch (e) { /* ignore */ }
+      };
+    } catch (e) {
+      console.error('Erro iniciando listener leads:', e);
     }
-  };
-  // ------------------------------------------------------------------------------
+  }, []);
 
   useEffect(() => {
-    if (!isEditing) {
-      fetchLeadsFromSheet();
-      const interval = setInterval(() => {
-        fetchLeadsFromSheet();
-      }, 300000);
-      return () => clearInterval(interval);
-    }
-  }, [leadSelecionado, isEditing]);
-
-  // ------------------ LEADS FECHADOS (mesma lógica, sem merge por enquanto) -------------
-  const fetchLeadsFechadosFromSheet = async () => {
+    // Listener para 'leadsFechados'
     try {
-      const response = await fetch(GOOGLE_SHEETS_LEADS_FECHADOS)
-      const data = await response.json();
+      const qFechados = query(collection(db, 'leadsFechados'), orderBy('closedAt', 'desc'));
+      const unsubFechados = onSnapshot(qFechados, (snapshot) => {
+        const arr = snapshot.docs.map(d => normalizeLead({ id: d.id, ...(d.data() || {}) }));
+        setLeadsFechados(arr);
+      }, (err) => {
+        console.error('Erro no listener leadsFechados:', err);
+      });
 
-      if (!Array.isArray(data)) {
-        setLeadsFechados([]);
-        return;
-      }
+      return () => {
+        try { unsubFechados(); } catch (e) { /* ignore */ }
+      };
+    } catch (e) {
+      console.error('Erro iniciando listener leadsFechados:', e);
+    }
+  }, []);
 
-      // normaliza e garante id/ID/documentId como strings
-      const formattedData = data.map(item => normalizeLead(item));
-      setLeadsFechados(formattedData);
+  // Também expomos fetchers pontuais (getDocs) caso algum componente queira forçar refresh manual
+  const fetchLeadsFromFirebase = async () => {
+    try {
+      const snap = await getDocs(query(collection(db, 'leads'), orderBy('createdAt', 'desc')));
+      const arr = snap.docs.map(d => normalizeLead({ id: d.id, ...(d.data() || {}) }));
+      setLeads(arr);
+    } catch (err) {
+      console.error('Erro ao buscar leads do Firebase:', err);
+      setLeads([]);
+    }
+  };
 
-    } catch (error) {
-      console.error('Erro ao buscar leads fechados:', error);
+  const fetchLeadsFechadosFromFirebase = async () => {
+    try {
+      const snap = await getDocs(query(collection(db, 'leadsFechados'), orderBy('closedAt', 'desc')));
+      const arr = snap.docs.map(d => normalizeLead({ id: d.id, ...(d.data() || {}) }));
+      setLeadsFechados(arr);
+    } catch (err) {
+      console.error('Erro ao buscar leadsFechados do Firebase:', err);
       setLeadsFechados([]);
     }
   };
-
-  useEffect(() => {
-    if (!isEditing) {
-      fetchLeadsFechadosFromSheet();
-      const interval = setInterval(() => {
-        fetchLeadsFechadosFromSheet();
-      }, 300000);
-      return () => clearInterval(interval);
-    }
-  }, [isEditing]);
-  // ------------------------------------------------------------------------------
+  // -------------------------------------------------------------------------------------
 
   // =========================================================================
   // === LÓGICA ADICIONADA: Função para atualizar o nome em Leads Fechados ===
@@ -549,7 +466,7 @@ function App() {
       )
     );
 
-    // Salva localmente para sincronizar depois (mantenha o estado local)
+    // Salva localmente para sincronizar depois (agora apenas localChanges persistidos, sem Sheets)
     saveLocalChange({
       id: id,
       type: 'atualizarStatus',
@@ -719,7 +636,7 @@ function App() {
       return updated;
     });
 
-    // Enfileira alteração localmente (mesmo que o lead não tenha sido localizado, para sincronizar posteriormente)
+    // Enfileira alteração localmente (mesmo que o lead não tenha sido localizado, para persistência local)
     try {
       const changeId = ident ?? (crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2));
       const dataToSave = {
@@ -799,7 +716,7 @@ function App() {
     }
   };
 
-  // FUNÇÃO PARA SALVAR OBSERVAÇÃO (agora salva localmente e só sincroniza após 5 minutos)
+  // FUNÇÃO PARA SALVAR OBSERVAÇÃO (apenas local)
   const salvarObservacao = async (leadId, observacao) => {
     try {
       if (typeof saveLocalChange === 'function') {
@@ -810,59 +727,11 @@ function App() {
         });
       }
 
-      console.log('Observação salva localmente. Será sincronizada após 5 minutos.');
+      console.log('Observação salva localmente.');
     } catch (error) {
       console.error('Erro ao salvar observação localmente:', error);
     }
   };
-
-  // ------------------ SYNC WORKER: envia alterações após expirarem ------------------
-  useEffect(() => {
-    loadLocalChangesFromStorage();
-
-    const interval = setInterval(async () => {
-      const now = Date.now();
-      const dueKeys = [];
-      const keys = Object.keys(localChangesRef.current);
-
-      for (const k of keys) {
-        const change = localChangesRef.current[k];
-        if (!change) continue;
-        if (now - change.timestamp >= SYNC_DELAY_MS) {
-          dueKeys.push(k);
-        }
-      }
-
-      if (dueKeys.length === 0) return;
-
-      for (const key of dueKeys) {
-        const change = localChangesRef.current[key];
-        if (!change) continue;
-
-        try {
-          await fetch(GOOGLE_APPS_SCRIPT_BASE_URL, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              action: change.type,
-              data: change.data,
-            }),
-          });
-
-          delete localChangesRef.current[key];
-          persistLocalChangesToStorage();
-
-        } catch (err) {
-          console.error('Erro ao sincronizar alteração local:', err);
-          // mantém para nova tentativa
-        }
-      }
-    }, SYNC_CHECK_INTERVAL_MS);
-
-    return () => clearInterval(interval);
-  }, []);
 
   const formatarDataParaDDMMYYYY = (dataString) => {
     if (!dataString) return '';
@@ -901,14 +770,10 @@ function App() {
     }
   };
 
-  // ===================== FUNÇÃO: não força sincronização imediata =====================
+  // ===================== FUNÇÃO: não força sincronização com Sheets (removido) =====================
   const forceSyncWithSheets = async () => {
-    try {
-      loadLocalChangesFromStorage();
-      console.log('forceSyncWithSheets: sincronização imediata desativada. Alterações serão enviadas após 5 minutos.');
-    } catch (error) {
-      console.error('Erro em forceSyncWithSheets (agora sem forçar):', error);
-    }
+    // removido: sincronização com Google Sheets
+    console.log('Sincronização com Google Sheets removida. As alterações são persistidas localmente apenas.');
   };
   // =============================================================================
 
@@ -997,7 +862,7 @@ function App() {
                 leads={isAdmin ? leads : leads.filter((lead) => String(lead.responsavel) === String(usuarioLogado.nome))}
                 usuarios={usuarios}
                 onUpdateStatus={atualizarStatusLead}
-                fetchLeadsFromSheet={fetchLeadsFromSheet}
+                fetchLeadsFromSheet={fetchLeadsFromFirebase} // renamed but usable by children
                 transferirLead={transferirLead}
                 usuarioLogado={usuarioLogado}
                 leadSelecionado={leadSelecionado}
@@ -1028,7 +893,7 @@ function App() {
                 onUpdateInsurer={atualizarSeguradoraLead}
                 onConfirmInsurer={confirmarSeguradoraLead}
                 onUpdateDetalhes={atualizarDetalhesLeadFechado}
-                fetchLeadsFechadosFromSheet={fetchLeadsFechadosFromSheet}
+                fetchLeadsFechadosFromSheet={fetchLeadsFechadosFromFirebase} // renamed but usable
                 isAdmin={isAdmin}
                 ultimoFechadoId={ultimoFechadoId}
                 onAbrirLead={onAbrirLead}
@@ -1046,7 +911,7 @@ function App() {
               <LeadsPerdidos
                 leads={isAdmin ? leads.filter((lead) => String(lead.status) === 'Perdido') : leads.filter((lead) => String(lead.responsavel) === String(usuarioLogado.nome) && String(lead.status) === 'Perdido')}
                 usuarios={usuarios}
-                fetchLeadsFromSheet={fetchLeadsFromSheet}
+                fetchLeadsFromSheet={fetchLeadsFromFirebase}
                 onAbrirLead={onAbrirLead}
                 isAdmin={isAdmin}
                 leadSelecionado={leadSelecionado}
@@ -1056,8 +921,8 @@ function App() {
           />
           <Route path="/buscar-lead" element={<BuscarLead
             leads={leads}
-            fetchLeadsFromSheet={fetchLeadsFromSheet}
-            fetchLeadsFechadosFromSheet={fetchLeadsFechadosFromSheet}
+            fetchLeadsFromSheet={fetchLeadsFromFirebase}
+            fetchLeadsFechadosFromSheet={fetchLeadsFechadosFromFirebase}
             setIsEditing={setIsEditing}
           />} />
           <Route
@@ -1075,8 +940,8 @@ function App() {
           )}
           <Route path="/ranking" element={<Ranking
             usuarios={usuarios}
-            fetchLeadsFromSheet={fetchLeadsFromSheet}
-            fetchLeadsFechadosFromSheet={fetchLeadsFechadosFromSheet}
+            fetchLeadsFromSheet={fetchLeadsFromFirebase}
+            fetchLeadsFechadosFromSheet={fetchLeadsFechadosFromFirebase}
             leads={leads} />} />
           <Route path="*" element={<h1 style={{ padding: 20 }}>Página não encontrada</h1>} />
         </Routes>
