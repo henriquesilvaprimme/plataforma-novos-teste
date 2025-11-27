@@ -93,6 +93,56 @@ function App() {
     }
   };
 
+  // Merge seguro: não sobrescreve campos quando o valor do change é undefined
+  const mergeWithDefined = (base, changeData = {}) => {
+    const result = { ...base };
+    Object.keys(changeData).forEach((k) => {
+      const v = changeData[k];
+      if (v !== undefined) result[k] = v;
+    });
+    return result;
+  };
+
+  // Normaliza um objeto de lead vindo do sheet/local para garantir campos básicos
+  const normalizeLead = (item = {}) => {
+    // tenta extrair id seguro
+    const rawId = item.id ?? item.ID ?? item.Id ?? item.IdLead ?? null;
+    const id = rawId !== null && rawId !== undefined ? rawId : (item.phone ? String(item.phone) : crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2));
+    const statusRaw = item.status ?? item.Status ?? item.stato ?? '';
+    const status = (typeof statusRaw === 'string' && statusRaw.trim() !== '') ? statusRaw : (item.confirmado ? 'Em Contato' : 'Selecione o status');
+    return {
+      id,
+      ID: item.ID ?? item.id ?? id,
+      name: item.name ?? item.Name ?? item.nome ?? '',
+      nome: item.nome ?? item.name ?? item.Name ?? '',
+      vehicleModel: item.vehicleModel ?? item.vehiclemodel ?? item.vehicle_model ?? '',
+      vehicleYearModel: item.vehicleYearModel ?? item.vehicleyearmodel ?? item.vehicle_year_model ?? '',
+      city: item.city ?? item.Cidade ?? item.cityName ?? '',
+      phone: item.phone ?? item.Telefone ?? item.Phone ?? '',
+      insuranceType: item.insuranceType ?? item.insurancetype ?? item.insurer ?? '',
+      status: status,
+      confirmado: item.confirmado === 'true' || item.confirmado === true || false,
+      insurer: item.insurer ?? item.Insurer ?? '',
+      insurerConfirmed: item.insurerConfirmed === 'true' || item.insurerConfirmed === true || false,
+      usuarioId: item.usuarioId ? Number(item.usuarioId) : (item.usuarioId ?? null),
+      premioLiquido: item.premioLiquido ?? item.PremioLiquido ?? '',
+      comissao: item.comissao ?? item.Comissao ?? '',
+      parcelamento: item.parcelamento ?? item.Parcelamento ?? '',
+      VigenciaFinal: item.VigenciaFinal ?? item.vigenciaFinal ?? '',
+      VigenciaInicial: item.VigenciaInicial ?? item.vigenciaInicial ?? '',
+      createdAt: item.createdAt ?? item.data ?? item.Data ?? new Date().toISOString(),
+      responsavel: item.responsavel ?? item.Responsavel ?? '',
+      editado: item.editado ?? '',
+      observacao: item.observacao ?? item.Observacao ?? '',
+      agendamento: item.agendamento ?? item.Agendamento ?? '',
+      agendados: item.agendados ?? false,
+      MeioPagamento: item.MeioPagamento ?? '',
+      CartaoPortoNovo: item.CartaoPortoNovo ?? '',
+      // preserva quaisquer outros campos
+      ...item,
+    };
+  };
+
   // Aplica uma alteração no estado local imediatamente (optimistic)
   const applyChangeToLocalState = (change) => {
     try {
@@ -106,14 +156,12 @@ function App() {
       setLeads(prev => {
         if (!prev || prev.length === 0) return prev;
         const updated = prev.map(l => {
-          // tentar casar por id numérico ou string
+          // tentar casar por id numérico ou string ou phone
           if (String(l.id) === String(leadId) || String(l.ID) === String(leadId) || String(data.phone || '') === String(l.phone || '')) {
             let copy = { ...l };
             if (type === 'alterarAtribuido') {
-              // data.usuarioId ou data.usuario pode estar presente
               if (data.usuarioId !== undefined) {
                 copy.usuarioId = data.usuarioId;
-                // tentar preencher nome do responsavel a partir de lista de usuarios
                 const u = usuarios.find(u => String(u.id) === String(data.usuarioId));
                 if (u) copy.responsavel = u.nome;
               } else if (data.responsavel !== undefined) {
@@ -155,16 +203,12 @@ function App() {
 
   // Save a local change (used by child components, optimistic update already handled there)
   const saveLocalChange = (change) => {
-    // change = { id: <idOuUuid>, type: 'status_update'|'alterarAtribuido'|'salvarObservacao'|..., data: {...} }
-    // Normaliza chave/leadId para garantir matching estável
     try {
-      const derivedLeadId = change.id ?? change.data?.id ?? change.data?.ID ?? change.data?.leadId ?? change.data?.leadId ?? change.data?.phone ?? null;
-      const keyBase = derivedLeadId ? String(derivedLeadId) : crypto.randomUUID();
+      const derivedLeadId = change.id ?? change.data?.id ?? change.data?.ID ?? change.data?.leadId ?? change.data?.phone ?? null;
+      const keyBase = derivedLeadId ? String(derivedLeadId) : (crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
       const key = keyBase;
-
       const timestamp = Date.now();
 
-      // Normalize stored object to always include leadId field for matching
       const stored = {
         ...change,
         id: key,
@@ -254,15 +298,16 @@ function App() {
   // ------------------ FETCH LEADS (com merge de localChanges) ------------------
   const applyLocalChangesToFetched = (fetchedLeads) => {
     const now = Date.now();
-    // curto-circuit: garante que localChanges estejam carregadas
     loadLocalChangesFromStorage();
 
-    const merged = fetchedLeads.map(lead => {
+    // primeiro mapeia fetched para objeto normalizado (garante status sempre string)
+    const normalizedFetched = fetchedLeads.map((f) => normalizeLead(f));
+
+    const merged = normalizedFetched.map(lead => {
       const matchedChangeKey = Object.keys(localChangesRef.current).find(k => {
         const ch = localChangesRef.current[k];
         if (!ch) return false;
 
-        // Match por vários campos possíveis
         const leadIdMatches = (ch.leadId && String(ch.leadId) === String(lead.id)) ||
                               (ch.leadId && String(ch.leadId) === String(lead.ID)) ||
                               (ch.id && String(ch.id) === String(lead.id)) ||
@@ -276,10 +321,11 @@ function App() {
       if (matchedChangeKey) {
         const change = localChangesRef.current[matchedChangeKey];
         if (!change) return lead;
-        // Aplicar somente se estiver dentro do período de "hold" (5 minutos)
         if (now - change.timestamp < SYNC_DELAY_MS) {
-          // Mesclar de forma conservadora: priorizar campos do change.data sobre o lead
-          return { ...lead, ...(change.data || {}) };
+          // Fazer merge seguro: não sobrescrever com undefined
+          const mergedLead = mergeWithDefined(lead, change.data || {});
+          // garantir normalização após merge
+          return normalizeLead(mergedLead);
         }
       }
 
@@ -291,10 +337,10 @@ function App() {
       const change = localChangesRef.current[k];
       if (!change) return;
       if (Date.now() - change.timestamp < SYNC_DELAY_MS) {
-        // se change representa um novo lead (ex.: type 'criarLead' ou não tem leadId que bata com fetched)
         const exists = merged.some(l => String(l.id) === String(change.leadId) || (change.data && String(l.phone) === String(change.data.phone)));
         if (!exists) {
-          merged.unshift({ id: change.leadId || change.id, ...(change.data || {}) });
+          const newLead = normalizeLead({ id: change.leadId || change.id, ...(change.data || {}) });
+          merged.unshift(newLead);
         }
       }
     });
@@ -308,36 +354,7 @@ function App() {
       const data = await response.json();
 
       if (Array.isArray(data)) {
-        const sortedData = data;
-
-        const formattedLeads = sortedData.map((item, index) => ({
-          id: item.id ? Number(item.id) : index + 1,
-          name: item.name || item.Name || '',
-          vehicleModel: item.vehiclemodel || item.vehicleModel || '',
-          vehicleYearModel: item.vehicleyearmodel || item.vehicleYearModel || '',
-          city: item.city || '',
-          phone: item.phone || item.Telefone || '',
-          insuranceType: item.insurancetype || item.insuranceType || '',
-          status: item.status || 'Selecione o status',
-          confirmado: item.confirmado === 'true' || item.confirmado === true,
-          insurer: item.insurer || '',
-          insurerConfirmed: item.insurerConfirmed === 'true' || item.insurerConfirmed === true,
-          usuarioId: item.usuarioId ? Number(item.usuarioId) : null,
-          premioLiquido: item.premioLiquido || '',
-          comissao: item.comissao || '',
-          parcelamento: item.parcelamento || '',
-          VigenciaFinal: item.VigenciaFinal || '',
-          VigenciaInicial: item.VigenciaInicial || '',
-          createdAt: item.data || new Date().toISOString(),
-          responsavel: item.responsavel || '',
-          editado: item.editado || '',
-          observacao: item.observacao || '',
-          agendamento: item.agendamento || '',
-          agendados: item.agendados || '',
-          // NOVOS CAMPOS
-          MeioPagamento: item.MeioPagamento || '',
-          CartaoPortoNovo: item.CartaoPortoNovo || '',
-        }));
+        const formattedLeads = data.map(item => normalizeLead(item));
 
         // Aplicar merge com alterações locais (se existirem)
         loadLocalChangesFromStorage();
@@ -376,12 +393,12 @@ function App() {
       const response = await fetch(GOOGLE_SHEETS_LEADS_FECHADOS)
       const data = await response.json();
 
-      const formattedData = data.map(item => ({
-        ...item,
-        insuranceType: item.insuranceType || '',
-        MeioPagamento: item.MeioPagamento || '',
-        CartaoPortoNovo: item.CartaoPortoNovo || '',
-      }));
+      if (!Array.isArray(data)) {
+        setLeadsFechados([]);
+        return;
+      }
+
+      const formattedData = data.map(item => normalizeLead(item));
       setLeadsFechados(formattedData);
 
     } catch (error) {
@@ -426,9 +443,10 @@ function App() {
   };
 
   const adicionarNovoLead = (novoLead) => {
+    const normalized = normalizeLead(novoLead);
     setLeads((prevLeads) => {
-      if (!prevLeads.some(lead => lead.ID === novoLead.ID)) {
-        return [novoLead, ...prevLeads];
+      if (!prevLeads.some(lead => String(lead.ID) === String(normalized.ID) || String(lead.id) === String(normalized.id))) {
+        return [normalized, ...prevLeads];
       }
       return prevLeads;
     });
@@ -455,7 +473,7 @@ function App() {
     // Atualiza UI local imediatamente (optimistic)
     setLeads((prev) =>
       prev.map((lead) =>
-        lead.phone === phone ? { ...lead, status: novoStatus, confirmado: true } : lead
+        lead.phone === phone ? { ...lead, status: novoStatus ?? lead.status, confirmado: true } : lead
       )
     );
 
@@ -480,7 +498,7 @@ function App() {
 
           if (leadParaAdicionar) {
             const novoLeadFechado = {
-              ID: leadParaAdicionar.id || crypto.randomUUID(),
+              ID: leadParaAdicionar.id || crypto?.randomUUID?.() || Math.random().toString(36).slice(2),
               name: leadParaAdicionar.name,
               vehicleModel: leadParaAdicionar.vehicleModel,
               vehicleYearModel: leadParaAdicionar.vehicleYearModel,
@@ -496,8 +514,8 @@ function App() {
               Parcelamento: leadParaAdicionar.Parcelamento || "",
               VigenciaInicial: leadParaAdicionar.VigenciaInicial || "",
               VigenciaFinal: leadParaAdicionar.VigenciaFinal || "",
-              MeioPagamento: leadParaAdicionar.MeioPagamento || "",
-              CartaoPortoNovo: leadParaAdicionar.CartaoPortoNovo || "",
+              MeioPagamento: leadParaAdicionar.MeioPagamento || '',
+              CartaoPortoNovo: leadParaAdicionar.CartaoPortoNovo || '',
               id: leadParaAdicionar.id || null,
               usuario: leadParaAdicionar.usuario || "",
               nome: leadParaAdicionar.nome || "",
@@ -520,7 +538,6 @@ function App() {
 
   const handleConfirmAgendamento = async (leadId, dataAgendada) => {
     try {
-      // Ao invés de enviar imediatamente, apenas salvamos a alteração localmente.
       if (typeof saveLocalChange === 'function') {
         saveLocalChange({
           id: leadId,
@@ -528,7 +545,6 @@ function App() {
           data: { leadId: leadId, dataAgendada: dataAgendada }
         });
       }
-      // Não forçar fetch imediato; sincronização ocorrerá após 5 minutos pelo worker.
     } catch (error) {
       console.error('Erro ao agendar (salvando localmente):', error);
     }
@@ -588,15 +604,13 @@ function App() {
       return atualizados;
     });
 
-    // Em vez de enviar imediatamente, salvamos a alteração local para sincronizar após 5 minutos.
     try {
-      const changeId = lead.ID ?? lead.id ?? crypto.randomUUID();
+      const changeId = lead.ID ?? lead.id ?? crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
       saveLocalChange({
         id: changeId,
         type: 'alterar_seguradora',
         data: lead
       });
-      // Não forçar fetch imediato nem setTimeout; o worker fará o envio quando vencer o TTL.
     } catch (error) {
       console.error('Erro ao enfileirar alteração de seguradora localmente:', error);
     }
@@ -637,8 +651,8 @@ function App() {
     setLeadSelecionado(lead);
 
     let path = '/leads';
-    if (lead.status === 'Fechado') path = '/leads-fechados';
-    else if (lead.status === 'Perdido') path = '/leads-perdidos';
+    if ((lead?.status ?? '') === 'Fechado') path = '/leads-fechados';
+    else if ((lead?.status ?? '') === 'Perdido') path = '/leads-perdidos';
 
     navigate(path);
   };
@@ -659,7 +673,6 @@ function App() {
   // FUNÇÃO PARA SALVAR OBSERVAÇÃO (agora salva localmente e só sincroniza após 5 minutos)
   const salvarObservacao = async (leadId, observacao) => {
     try {
-      // Salva localmente para retry/sync futuro (TTL 5 minutos gerenciado pelo App)
       if (typeof saveLocalChange === 'function') {
         saveLocalChange({
           id: leadId,
@@ -669,7 +682,6 @@ function App() {
       }
 
       console.log('Observação salva localmente. Será sincronizada após 5 minutos.');
-      // Não forçar fetchLeadsFromSheet aqui; o worker fará o envio quando vencer o TTL.
     } catch (error) {
       console.error('Erro ao salvar observação localmente:', error);
     }
@@ -677,7 +689,6 @@ function App() {
 
   // ------------------ SYNC WORKER: envia alterações após expirarem ------------------
   useEffect(() => {
-    // carrega alterações ao montar
     loadLocalChangesFromStorage();
 
     const interval = setInterval(async () => {
@@ -695,13 +706,11 @@ function App() {
 
       if (dueKeys.length === 0) return;
 
-      // Processa cada alteração vencida (envia POST genérico; você pode customizar por tipo)
       for (const key of dueKeys) {
         const change = localChangesRef.current[key];
         if (!change) continue;
 
         try {
-          // Envio genérico: action=change.type, data=change.data
           await fetch(GOOGLE_APPS_SCRIPT_BASE_URL, {
             method: 'POST',
             headers: {
@@ -713,14 +722,12 @@ function App() {
             }),
           });
 
-          // Após envio, removemos a alteração local
           delete localChangesRef.current[key];
           persistLocalChangesToStorage();
 
-          // NÃO FORÇAMOS FETCH imediato — o app continuará sincronizando periodicamente.
         } catch (err) {
           console.error('Erro ao sincronizar alteração local:', err);
-          // Em caso de erro, mantemos a alteração para tentar de novo posteriormente
+          // mantém para nova tentativa
         }
       }
     }, SYNC_CHECK_INTERVAL_MS);
@@ -767,10 +774,7 @@ function App() {
 
   // ===================== FUNÇÃO: não força sincronização imediata =====================
   const forceSyncWithSheets = async () => {
-    // Agora esta função NÃO força atualização imediata.
-    // Para respeitar a regra: todas as mudanças são salvas localmente e sincronizadas somente após 5 minutos.
     try {
-      // Apenas recarrega o que há no storage local (sem limpar/persistir/forçar envios).
       loadLocalChangesFromStorage();
       console.log('forceSyncWithSheets: sincronização imediata desativada. Alterações serão enviadas após 5 minutos.');
     } catch (error) {
@@ -845,12 +849,12 @@ function App() {
                 leadsClosed={
                   isAdmin
                     ? leadsFechados
-                    : leadsFechados.filter((lead) => lead.Responsavel === usuarioLogado.nome)
+                    : leadsFechados.filter((lead) => String(lead.Responsavel) === String(usuarioLogado.nome))
                 }
                 leads={
                   isAdmin
                     ? leads
-                    : leads.filter((lead) => lead.responsavel === usuarioLogado.nome)
+                    : leads.filter((lead) => String(lead.responsavel) === String(usuarioLogado.nome))
                 }
                 usuarioLogado={usuarioLogado}
                 setIsEditing={setIsEditing}
@@ -861,7 +865,7 @@ function App() {
             path="/leads"
             element={
               <Leads
-                leads={isAdmin ? leads : leads.filter((lead) => lead.responsavel === usuarioLogado.nome)}
+                leads={isAdmin ? leads : leads.filter((lead) => String(lead.responsavel) === String(usuarioLogado.nome))}
                 usuarios={usuarios}
                 onUpdateStatus={atualizarStatusLead}
                 fetchLeadsFromSheet={fetchLeadsFromSheet}
@@ -872,9 +876,7 @@ function App() {
                 scrollContainerRef={mainContentRef}
                 onConfirmAgendamento={handleConfirmAgendamento}
                 salvarObservacao={salvarObservacao}
-                // NOVO: função que salva alterações localmente para sincronizar depois
                 saveLocalChange={saveLocalChange}
-                // FUNÇÃO ATUALIZADA: agora NÃO força sincronização imediata
                 forceSyncWithSheets={forceSyncWithSheets}
               />
             }
@@ -883,7 +885,7 @@ function App() {
             path="/leads-fechados"
             element={
               <LeadsFechados
-                leads={isAdmin ? leadsFechados : leadsFechados.filter((lead) => lead.Responsavel === usuarioLogado.nome)}
+                leads={isAdmin ? leadsFechados : leadsFechados.filter((lead) => String(lead.Responsavel) === String(usuarioLogado.nome))}
                 usuarios={usuarios}
                 onUpdateInsurer={atualizarSeguradoraLead}
                 onConfirmInsurer={confirmarSeguradoraLead}
@@ -904,7 +906,7 @@ function App() {
             path="/leads-perdidos"
             element={
               <LeadsPerdidos
-                leads={isAdmin ? leads.filter((lead) => lead.status === 'Perdido') : leads.filter((lead) => lead.responsavel === usuarioLogado.nome && lead.status === 'Perdido')}
+                leads={isAdmin ? leads.filter((lead) => String(lead.status) === 'Perdido') : leads.filter((lead) => String(lead.responsavel) === String(usuarioLogado.nome) && String(lead.status) === 'Perdido')}
                 usuarios={usuarios}
                 fetchLeadsFromSheet={fetchLeadsFromSheet}
                 onAbrirLead={onAbrirLead}
