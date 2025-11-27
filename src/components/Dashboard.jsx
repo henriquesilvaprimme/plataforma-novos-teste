@@ -1,322 +1,347 @@
-import React, { useState, useEffect } from 'react';
-import { RefreshCcw } from 'lucide-react'; // Importação do ícone de refresh
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  collection,
+  query,
+  onSnapshot,
+  where,
+  getDocs,
+} from 'firebase/firestore';
+import { db } from './firebase';
+import {
+  Users,
+  DollarSign,
+  PhoneCall,
+  PhoneOff,
+  Calendar,
+  XCircle,
+  TrendingUp,
+} from 'lucide-react';
 
-const Dashboard = ({ leads, usuarioLogado }) => {
-  const [leadsClosed, setLeadsClosed] = useState([]);
-  const [loading, setLoading] = useState(true); // Estado original do Dashboard
-  const [isLoading, setIsLoading] = useState(false); // Novo estado para o botão de refresh
+const Dashboard = ({ usuarioLogado }) => {
+  const [leadsData, setLeadsData] = useState([]);
+  const [usuariosData, setUsuariosData] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [filtroMesAno, setFiltroMesAno] = useState('');
 
-  // Inicializar dataInicio e dataFim com valores padrão ao carregar o componente
-  const getPrimeiroDiaMes = () => {
-    const hoje = new Date();
-    return new Date(hoje.getFullYear(), hoje.getMonth(), 1).toISOString().slice(0, 10);
+  // Função auxiliar para normalizar leads (copiada de Leads.jsx)
+  const normalizeLead = (docId, data = {}) => {
+    const safe = (v) => (v === undefined || v === null ? '' : v);
+
+    const toISO = (v) => {
+      if (!v && v !== 0) return '';
+      if (typeof v === 'object' && typeof v.toDate === 'function') {
+        return v.toDate().toISOString();
+      }
+      if (typeof v === 'string') return v;
+      try {
+        return new Date(v).toISOString();
+      } catch {
+        return '';
+      }
+    };
+
+    return {
+      id: String(docId),
+      status: typeof data.status === 'string' ? data.status : data.Status ?? '',
+      usuarioId:
+        data.usuarioId !== undefined && data.usuarioId !== null
+          ? Number(data.usuarioId)
+          : data.usuarioId ?? null,
+      responsavel: data.responsavel ?? data.Responsavel ?? '',
+      createdAt: toISO(data.createdAt ?? data.data ?? data.Data ?? data.criadoEm),
+      ...data,
+    };
   };
 
-  const getDataHoje = () => {
-    return new Date().toISOString().slice(0, 10);
-  };
+  // Listener para leads
+  useEffect(() => {
+    setIsLoading(true);
+    const leadsColRef = collection(db, 'leads');
+    const unsubscribeLeads = onSnapshot(
+      leadsColRef,
+      (snapshot) => {
+        const leadsList = snapshot.docs.map((doc) =>
+          normalizeLead(doc.id, doc.data())
+        );
+        setLeadsData(leadsList);
+        setIsLoading(false);
+      },
+      (error) => {
+        console.error('Erro ao buscar leads:', error);
+        setIsLoading(false);
+      }
+    );
 
-  const [dataInicio, setDataInicio] = useState(getPrimeiroDiaMes());
-  const [dataFim, setDataFim] = useState(getDataHoje());
-  const [filtroAplicado, setFiltroAplicado] = useState({ inicio: getPrimeiroDiaMes(), fim: getDataHoje() });
+    // Listener para usuários
+    const usuariosColRef = collection(db, 'usuarios');
+    const unsubscribeUsuarios = onSnapshot(
+      usuariosColRef,
+      (snapshot) => {
+        const usuariosList = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setUsuariosData(usuariosList);
+      },
+      (error) => {
+        console.error('Erro ao buscar usuários:', error);
+      }
+    );
 
-  // Função auxiliar para validar e formatar a data (mantida da iteração anterior)
-  const getValidDateStr = (dateValue) => {
-    if (!dateValue) return null;
-    const dateObj = new Date(dateValue);
-    if (isNaN(dateObj.getTime())) {
+    return () => {
+      unsubscribeLeads();
+      unsubscribeUsuarios();
+    };
+  }, []);
+
+  const isAdmin = usuarioLogado?.tipo === 'Admin';
+
+  const getCurrentUserFromPropOrStorage = () => {
+    if (usuarioLogado) return usuarioLogado;
+    try {
+      const raw = localStorage.getItem('user');
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) {
       return null;
     }
-    return dateObj.toISOString().slice(0, 10);
   };
 
-  // Busca leads fechados (adaptada para ser a que será chamada pelo refresh)
-  const buscarLeadsClosedFromAPI = async () => {
-    setIsLoading(true); // Ativa o loading do botão
-    setLoading(true); // Ativa o loading original do Dashboard
-    try {
-      const respostaLeads = await fetch(
-        'https://script.google.com/macros/s/AKfycbzSkLIDEJUeJMf8cQestU8jVAaafHPPStvYsnsJMbgoNyEXHkmz4eXica0UOEdUQFea/exec?v=pegar_clientes_fechados'
-      );
-      const dadosLeads = await respostaLeads.json();
-      setLeadsClosed(dadosLeads);
-    } catch (error) {
-      console.error('Erro ao buscar leads:', error);
-    } finally {
-      setIsLoading(false); // Desativa o loading do botão
-      setLoading(false); // Desativa o loading original do Dashboard
+  const canViewLead = (lead) => {
+    if (isAdmin) return true;
+    const user = getCurrentUserFromPropOrStorage();
+    if (!user) return false;
+
+    const userId = String(user.id ?? user.ID ?? user.userId ?? '').trim();
+    const userNome = String(user.nome ?? user.name ?? user.usuario ?? '')
+      .trim()
+      .toLowerCase();
+
+    const leadUsuarioId =
+      lead.usuarioId !== undefined && lead.usuarioId !== null
+        ? String(lead.usuarioId).trim()
+        : '';
+    if (leadUsuarioId && userId && leadUsuarioId === userId) return true;
+
+    const leadResponsavel = String(lead.responsavel ?? lead.Responsavel ?? '')
+      .trim()
+      .toLowerCase();
+    if (leadResponsavel && userNome && leadResponsavel === userNome) return true;
+
+    const leadUsuarioLogin = String(
+      lead.usuario ?? lead.user ?? lead.raw?.usuario ?? lead.raw?.user ?? ''
+    ).trim();
+    const userLogin = String(user.usuario ?? '').trim();
+    if (leadUsuarioLogin && userLogin && leadUsuarioLogin === userLogin) return true;
+
+    return false;
+  };
+
+  const isStatusAgendado = (status) => {
+    return typeof status === 'string' && status.startsWith('Agendado');
+  };
+
+  const extractStatusDate = (status) => {
+    if (typeof status !== 'string') return null;
+    const parts = status.split(' - ');
+    return parts.length > 1 ? parts[1] : null;
+  };
+
+  const filteredLeads = useMemo(() => {
+    let filtered = leadsData.filter((lead) => canViewLead(lead));
+
+    if (filtroMesAno) {
+      const [filtroAno, filtroMes] = filtroMesAno.split('-').map(Number);
+      filtered = filtered.filter((lead) => {
+        if (!lead.createdAt) return false;
+        try {
+          const leadDate = new Date(lead.createdAt);
+          return (
+            leadDate.getFullYear() === filtroAno &&
+            leadDate.getMonth() + 1 === filtroMes
+          );
+        } catch (e) {
+          console.error('Erro ao filtrar lead por data:', e);
+          return false;
+        }
+      });
     }
-  };
+    return filtered;
+  }, [leadsData, usuarioLogado, filtroMesAno]);
 
-  // refresh automático ao entrar na aba (similar ao useEffect do LeadsFechados)
-  useEffect(() => {
-    buscarLeadsClosedFromAPI();
-  }, []); // Array de dependências vazia para rodar apenas uma vez na montagem
+  const dashboardStats = useMemo(() => {
+    let totalLeads = 0;
+    let vendas = 0;
+    let emContato = 0;
+    let semContato = 0;
+    let agendadosHoje = 0;
+    let perdidos = 0;
+    const today = new Date().toLocaleDateString('pt-BR');
 
-  const aplicarFiltroData = () => {
-    setFiltroAplicado({ inicio: dataInicio, fim: dataFim });
-  };
+    filteredLeads.forEach((lead) => {
+      totalLeads++; // Todos os leads visíveis e filtrados por data
 
-  // Filtro por data dos leads gerais (vindos via prop `leads`)
-  const leadsFiltradosPorDataGeral = leads.filter((lead) => {
-    const dataLeadStr = getValidDateStr(lead.createdAt);
-    if (!dataLeadStr) return false;
-    if (filtroAplicado.inicio && dataLeadStr < filtroAplicado.inicio) return false;
-    if (filtroAplicado.fim && dataLeadStr > filtroAplicado.fim) return false;
-    return true;
-  });
+      const s = lead.status ?? '';
 
-  const totalLeads = leadsFiltradosPorDataGeral.length;
-  const leadsPerdidos = leadsFiltradosPorDataGeral.filter((lead) => lead.status === 'Perdido').length;
-  const leadsEmContato = leadsFiltradosPorDataGeral.filter((lead) => lead.status === 'Em Contato').length;
-  const leadsSemContato = leadsFiltradosPorDataGeral.filter((lead) => lead.status === 'Sem Contato').length;
+      if (s === 'Fechado') {
+        vendas++;
+      } else if (s === 'Em Contato') {
+        emContato++;
+      } else if (s === 'Sem Contato') {
+        semContato++;
+      } else if (isStatusAgendado(s)) {
+        const statusDateStr = extractStatusDate(s);
+        if (statusDateStr) {
+          const [dia, mes, ano] = statusDateStr.split('/');
+          const statusDateFormatted = new Date(
+            `${ano}-${mes}-${dia}T00:00:00`
+          ).toLocaleDateString('pt-BR');
+          if (statusDateFormatted === today) {
+            agendadosHoje++;
+          }
+        }
+      } else if (s === 'Perdido') {
+        perdidos++;
+      }
+    });
 
-  // Filtra leads fechados por responsável (do estado `leadsClosed`)
-  let leadsFiltradosClosed =
-    usuarioLogado.tipo === 'Admin'
-      ? leadsClosed
-      : leadsClosed.filter((lead) => lead.Responsavel === usuarioLogado.nome);
+    const taxaConversao = totalLeads > 0 ? (vendas / totalLeads) * 100 : 0;
 
-  // Filtro de data nos leads fechados
-  leadsFiltradosClosed = leadsFiltradosClosed.filter((lead) => {
-    const dataLeadStr = getValidDateStr(lead.Data);
-    if (!dataLeadStr) return false;
-    if (filtroAplicado.inicio && dataLeadStr < filtroAplicado.inicio) return false;
-    if (filtroAplicado.fim && dataLeadStr > filtroAplicado.fim) return false;
-    return true;
-  });
+    return {
+      totalLeads,
+      vendas,
+      emContato,
+      semContato,
+      agendadosHoje,
+      perdidos,
+      taxaConversao: taxaConversao.toFixed(2),
+    };
+  }, [filteredLeads]);
 
-  // Normalização helper para o campo Seguradora (trim + lowercase)
-  const getSegNormalized = (lead) => {
-    return (lead?.Seguradora || '').toString().trim().toLowerCase();
-  };
-
-  // Lista de seguradoras que devem ser contadas como "Demais Seguradoras"
-  const demaisSeguradorasLista = [
-    'tokio',
-    'yelum',
-    'suhai',
-    'allianz',
-    'bradesco',
-    'hdi',
-    'zurich',
-    'alfa',
-    'mitsui',
-    'mapfre',
-    'demais seguradoras' // inclui explicitamente o rótulo "Demais Seguradoras"
-  ];
-
-  // Contadores por seguradora (comparação normalizada)
-  const portoSeguro = leadsFiltradosClosed.filter((lead) => getSegNormalized(lead) === 'porto seguro').length;
-  const azulSeguros = leadsFiltradosClosed.filter((lead) => getSegNormalized(lead) === 'azul seguros').length;
-  const itauSeguros = leadsFiltradosClosed.filter((lead) => getSegNormalized(lead) === 'itau seguros').length;
-
-  // Agora 'demais' conta qualquer lead cuja seguradora esteja na lista acima (case-insensitive)
-  const demais = leadsFiltradosClosed.filter((lead) => demaisSeguradorasLista.includes(getSegNormalized(lead))).length;
-
-  // O campo Vendas soma os contadores das seguradoras
-  const leadsFechadosCount = portoSeguro + azulSeguros + itauSeguros + demais;
-
-  // CÁLCULO DA TAXA DE CONVERSÃO (Nova lógica)
-  const taxaConversao =
-    totalLeads > 0
-      ? Math.round((leadsFechadosCount / totalLeads) * 100) // Calcula, multiplica por 100 e arredonda
-      : 0;
-
-  // Soma de prêmio líquido
-  const totalPremioLiquido = leadsFiltradosClosed.reduce(
-    (acc, lead) => acc + (Number(lead.PremioLiquido) || 0),
-    0
-  );
-
-  // --- CÁLCULO DA MÉDIA COMISSÃO (AJUSTADO CONFORME SOLICITADO) ---
-  // Lógica: Total de percentual de comissao dividido pelo numero total de Vendas.
-
-  // 1. Soma total dos percentuais de comissão
-  const somaTotalPercentualComissao = leadsFiltradosClosed.reduce(
-    (acc, lead) => acc + (Number(lead.Comissao) || 0),
-    0
-  );
-
-  // 2. Número total de vendas (igual a leadsFiltradosClosed.length)
-  const totalVendasParaMedia = leadsFiltradosClosed.length;
-
-  // 3. Média Comissão: Total Percentual / Total Vendas
-  const comissaoMediaGlobal =
-    totalVendasParaMedia > 0 ? somaTotalPercentualComissao / totalVendasParaMedia : 0;
-  // --- FIM CÁLCULO AJUSTADO ---
-
-  const boxStyle = {
-    padding: '10px',
-    borderRadius: '5px',
-    flex: 1,
-    color: '#fff',
-    textAlign: 'center',
+  const handleMesAnoChange = (e) => {
+    setFiltroMesAno(e.target.value);
   };
 
   return (
-    <div style={{ padding: '20px' }}>
-      <h1>Dashboard</h1>
-
-      {/* Filtro de datas com botão e o NOVO Botão de Refresh */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          marginBottom: '20px',
-          flexWrap: 'wrap',
-        }}
-      >
-        <input
-          type="date"
-          value={dataInicio}
-          onChange={(e) => setDataInicio(e.target.value)}
-          style={{
-            padding: '6px 10px',
-            borderRadius: '6px',
-            border: '1px solid #ccc',
-            cursor: 'pointer',
-          }}
-          title="Data de Início"
-        />
-        <input
-          type="date"
-          value={dataFim}
-          onChange={(e) => setDataFim(e.target.value)}
-          style={{
-            padding: '6px 10px',
-            borderRadius: '6px',
-            border: '1px solid #ccc',
-            cursor: 'pointer',
-          }}
-          title="Data de Fim"
-        />
-        <button
-          onClick={aplicarFiltroData}
-          style={{
-            backgroundColor: '#007bff',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            padding: '6px 14px',
-            cursor: 'pointer',
-          }}
-        >
-          Filtrar
-        </button>
-
-        {/* Botão de Refresh */}
-        <button
-          title='Clique para atualizar os dados'
-          onClick={buscarLeadsClosedFromAPI} // Chama a função que busca e atualiza os leads fechados
-          disabled={isLoading}
-          style={{
-            backgroundColor: '#6c757d', // Cor cinza para o botão de refresh
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            padding: '6px 10px', // Um pouco menor para o ícone
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            minWidth: '36px', // Tamanho mínimo para o ícone
-            height: '36px',
-          }}
-        >
-          {isLoading ? (
-            <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    <div className="p-4 md:p-6 lg:p-8 relative min-h-screen bg-gray-100 font-sans">
+      {isLoading && (
+        <div className="fixed inset-0 bg-white bg-opacity-80 flex justify-center items-center z-50">
+          <div className="flex items-center">
+            <svg
+              className="animate-spin h-8 w-8 text-indigo-600"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              ></circle>
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              ></path>
             </svg>
-          ) : (
-            <RefreshCcw size={20} /> // Ícone de refresh
-          )}
-        </button>
-      </div>
-
-      {/* Spinner de carregamento para o Dashboard geral (opcional, pode ser removido se o `isLoading` for suficiente) */}
-      {loading && (
-        <div style={{ textAlign: 'center', padding: '20px' }}>
-          <p>Carregando dados do dashboard...</p>
-          {/* Você pode adicionar um spinner aqui se quiser um indicador visual */}
+            <p className="ml-4 text-xl font-semibold text-gray-700">
+              Carregando Dashboard...
+            </p>
+          </div>
         </div>
       )}
 
-      {!loading && ( // Renderiza o conteúdo apenas quando não estiver carregando
-        <>
-          {/* Primeira linha de contadores */}
-          <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
-            <div style={{ ...boxStyle, backgroundColor: '#eee', color: '#333' }}>
-              <h3>Total de Leads</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{totalLeads}</p>
+      <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b pb-4 mb-4">
+          <h1 className="text-4xl font-extrabold text-gray-900 flex items-center">
+            <TrendingUp size={32} className="text-indigo-500 mr-3" />
+            Dashboard
+          </h1>
+          <div className="flex items-center gap-2">
+            <label htmlFor="filtroMesAno" className="text-sm font-medium text-gray-700">
+              Filtrar por Mês/Ano:
+            </label>
+            <input
+              type="month"
+              id="filtroMesAno"
+              value={filtroMesAno}
+              onChange={handleMesAnoChange}
+              className="p-2 border border-gray-300 rounded-lg cursor-pointer text-sm"
+              title="Filtrar dados por mês e ano de criação do lead"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {/* Card: Total de Leads */}
+          <div className="bg-indigo-500 text-white rounded-lg p-5 shadow-md flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium opacity-80">Total de Leads</p>
+              <p className="text-3xl font-bold">{dashboardStats.totalLeads}</p>
             </div>
-            {/* NOVO COTADO: TAXA DE CONVERSÃO */}
-            <div style={{ ...boxStyle, backgroundColor: '#9C27B0' }}> {/* Nova cor para destacar */}
-              <h3>Taxa de Conversão</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{taxaConversao}%</p>
-            </div>
-            {/* FIM DO NOVO COTADO */}
-            <div style={{ ...boxStyle, backgroundColor: '#4CAF50' }}>
-              <h3>Vendas</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{leadsFechadosCount}</p>
-            </div>
-            <div style={{ ...boxStyle, backgroundColor: '#F44336' }}>
-              <h3>Leads Perdidos</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{leadsPerdidos}</p>
-            </div>
-            <div style={{ ...boxStyle, backgroundColor: '#FF9800' }}>
-              <h3>Em Contato</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{leadsEmContato}</p>
-            </div>
-            <div style={{ ...boxStyle, backgroundColor: '#9E9E9E' }}>
-              <h3>Sem Contato</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{leadsSemContato}</p>
-            </div>
+            <Users size={36} />
           </div>
 
-          {/* Segunda linha de contadores */}
-          <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
-            <div style={{ ...boxStyle, backgroundColor: '#003366' }}>
-              <h3>Porto Seguro</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{portoSeguro}</p>
+          {/* Card: Vendas */}
+          <div className="bg-green-500 text-white rounded-lg p-5 shadow-md flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium opacity-80">Vendas</p>
+              <p className="text-3xl font-bold">{dashboardStats.vendas}</p>
             </div>
-            <div style={{ ...boxStyle, backgroundColor: '#87CEFA' }}>
-              <h3>Azul Seguros</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{azulSeguros}</p>
-            </div>
-            <div style={{ ...boxStyle, backgroundColor: '#FF8C00' }}>
-              <h3>Itau Seguros</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{itauSeguros}</p>
-            </div>
-            <div style={{ ...boxStyle, backgroundColor: '#4CAF50' }}>
-              <h3>Demais Seguradoras</h3>
-              <p style={{ fontSize: '24px', fontWeight: 'bold' }}>{demais}</p>
-            </div>
+            <DollarSign size={36} />
           </div>
 
-          {/* Somente para Admin: linha de Prêmio Líquido e Comissão */}
-            <div style={{ display: 'flex', gap: '20px', marginTop: '20px' }}>
-              <div style={{ ...boxStyle, backgroundColor: '#3f51b5' }}>
-                <h3>Total Prêmio Líquido</h3>
-                <p style={{ fontSize: '24px', fontWeight: 'bold' }}>
-                  {totalPremioLiquido.toLocaleString('pt-BR', {
-                    style: 'currency',
-                    currency: 'BRL',
-                  })}
-                </p>
-              </div>
-                
-              <div style={{ ...boxStyle, backgroundColor: '#009688' }}>
-                <h3>Média Comissão</h3>
-                <p style={{ fontSize: '24px', fontWeight: 'bold' }}>
-                  {comissaoMediaGlobal.toFixed(2).replace('.', ',')}%
-                </p>
-              </div>
+          {/* Card: Taxa de Conversão */}
+          <div className="bg-purple-500 text-white rounded-lg p-5 shadow-md flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium opacity-80">Taxa de Conversão</p>
+              <p className="text-3xl font-bold">{dashboardStats.taxaConversao}%</p>
             </div>
-        </>
-      )}
+            <TrendingUp size={36} />
+          </div>
+
+          {/* Card: Em Contato */}
+          <div className="bg-orange-500 text-white rounded-lg p-5 shadow-md flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium opacity-80">Em Contato</p>
+              <p className="text-3xl font-bold">{dashboardStats.emContato}</p>
+            </div>
+            <PhoneCall size={36} />
+          </div>
+
+          {/* Card: Sem Contato */}
+          <div className="bg-gray-700 text-white rounded-lg p-5 shadow-md flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium opacity-80">Sem Contato</p>
+              <p className="text-3xl font-bold">{dashboardStats.semContato}</p>
+            </div>
+            <PhoneOff size={36} />
+          </div>
+
+          {/* Card: Agendados Hoje */}
+          <div className="bg-blue-500 text-white rounded-lg p-5 shadow-md flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium opacity-80">Agendados Hoje</p>
+              <p className="text-3xl font-bold">{dashboardStats.agendadosHoje}</p>
+            </div>
+            <Calendar size={36} />
+          </div>
+
+          {/* Card: Perdidos */}
+          <div className="bg-red-500 text-white rounded-lg p-5 shadow-md flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium opacity-80">Perdidos</p>
+              <p className="text-3xl font-bold">{dashboardStats.perdidos}</p>
+            </div>
+            <XCircle size={36} />
+          </div>
+        </div>
+      </div>
+
+      {/* Aqui você pode adicionar mais seções do dashboard, como gráficos, tabelas, etc. */}
     </div>
   );
 };
