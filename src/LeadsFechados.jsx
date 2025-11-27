@@ -112,6 +112,83 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
         return nomeNormalizado.includes(filtroNormalizado);
     };
 
+    // Util: converte vários formatos de moeda para float (ex.: "R$ 1.234,56" -> 1234.56)
+    const parseCurrencyToFloat = (raw) => {
+        if (raw === undefined || raw === null) return NaN;
+        let s = String(raw).trim();
+        if (s === '') return NaN;
+
+        // Remove "R$", espaços e outros caracteres alfabéticos
+        s = s.replace(/R\$\s*/i, '');
+        // Remove any non-digit, non-dot, non-comma, non-minus
+        s = s.replace(/[^\d\.,-]/g, '');
+
+        // If contains both '.' and ',' assume '.' are thousands and ',' decimal (BRL)
+        if (s.indexOf('.') !== -1 && s.indexOf(',') !== -1) {
+            s = s.replace(/\./g, '').replace(',', '.');
+        } else {
+            // If only contains ',' treat as decimal separator
+            if (s.indexOf(',') !== -1 && s.indexOf('.') === -1) {
+                s = s.replace(',', '.');
+            }
+            // If only contains '.' could be decimal or already float; keep as is
+        }
+
+        const n = parseFloat(s);
+        return isNaN(n) ? NaN : n;
+    };
+
+    // Util: converte várias representações de data para YYYY-MM-DD (input date value)
+    const parseDateToInputValue = (raw) => {
+        if (!raw && raw !== 0) return '';
+        try {
+            // Firestore Timestamp-like
+            if (typeof raw === 'object' && typeof raw.toDate === 'function') {
+                const d = raw.toDate();
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                return `${y}-${m}-${day}`;
+            }
+
+            // If it's a Date object
+            if (raw instanceof Date) {
+                const y = raw.getFullYear();
+                const m = String(raw.getMonth() + 1).padStart(2, '0');
+                const day = String(raw.getDate()).padStart(2, '0');
+                return `${y}-${m}-${day}`;
+            }
+
+            // String cases:
+            const s = String(raw).trim();
+
+            // If ISO or includes 'T' (e.g., 2024-11-27T10:00:00Z)
+            if (/^\d{4}-\d{2}-\d{2}T/.test(s) || /^\d{4}-\d{2}-\d{2}$/.test(s)) {
+                const d = new Date(s);
+                if (!isNaN(d.getTime())) {
+                    const y = d.getFullYear();
+                    const m = String(d.getMonth() + 1).padStart(2, '0');
+                    const day = String(d.getDate()).padStart(2, '0');
+                    return `${y}-${m}-${day}`;
+                }
+            }
+
+            // If DD/MM/YYYY
+            if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+                const [dd, mm, yyyy] = s.split('/');
+                return `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
+            }
+
+            // If already in YYYY-MM-DD but maybe with time zone
+            const mIso = s.match(/^(\d{4}-\d{2}-\d{2})/);
+            if (mIso) return mIso[1];
+
+            return '';
+        } catch (e) {
+            return '';
+        }
+    };
+
     // Normaliza um documento de leadsFechados similar ao Leads.jsx
     const normalizeClosedLead = (docId, data = {}) => {
         const safe = (v) => (v === undefined || v === null ? '' : v);
@@ -166,6 +243,16 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
         // createdAt fallback
         let createdAtRaw = data.createdAt ?? data.created ?? data.Data ?? null;
 
+        // Campos financeiros e vigências (preservamos nas raw e tentamos normalizar)
+        const rawPremio = data.PremioLiquido ?? data.premioLiquido ?? data.Premio ?? '';
+        const rawVigI = data.VigenciaInicial ?? data.vigenciaInicial ?? data.VigenciaInicio ?? '';
+        const rawVigF = data.VigenciaFinal ?? data.vigenciaFinal ?? data.VigenciaFim ?? '';
+        const rawComissao = data.Comissao ?? data.comissao ?? data.comission ?? '';
+        const rawParcelamento = data.Parcelamento ?? data.parcelamento ?? data.Parcelas ?? '';
+        const rawMeioPagamento = data.MeioPagamento ?? data.meioPagamento ?? data.Meiopagamento ?? '';
+        const rawCartaoPortoNovo = data.CartaoPortoNovo ?? data.cartaoPortoNovo ?? data.Cartao ?? '';
+        const rawSeguradora = data.Seguradora ?? data.insurer ?? data.seguradora ?? '';
+
         return {
             id: String(docId),
             ID: data.ID ?? data.id ?? docId,
@@ -186,8 +273,18 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
             Observacao: data.Observacao ?? data.observacao ?? '',
             Responsavel: data.Responsavel ?? data.responsavel ?? '',
             usuarioId: data.usuarioId ?? data.userId ?? null,
-            // Preserva raw fields
-            raw: data,
+            // Campos financeiros e vigência brutos
+            raw: {
+                ...data,
+                PremioLiquido: rawPremio,
+                VigenciaInicial: rawVigI,
+                VigenciaFinal: rawVigF,
+                Comissao: rawComissao,
+                Parcelamento: rawParcelamento,
+                MeioPagamento: rawMeioPagamento,
+                CartaoPortoNovo: rawCartaoPortoNovo,
+                Seguradora: rawSeguradora,
+            },
             // preserve timestamps/raw
             closedAt: closedAtRaw,
             createdAt: createdAtRaw,
@@ -255,90 +352,158 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
 
     // --- EFEITO DE FILTRAGEM E SINCRONIZAÇÃO DE ESTADOS ---
     useEffect(() => {
-        // Usa leadsFromFirebase (normalizados)
+        // Uses leadsFromFirebase (normalized)
         const fechadosAtuais = (leadsFromFirebase || []).filter(lead => {
-            // Se tiver Status definido, requer 'Fechado'
-            if (lead.Status) return String(lead.Status) === 'Fechado';
-            // Se houver closedAt, assumimos fechado
+            // If Status is defined, require 'Fechado' (string match)
+            if (lead.Status) return String(lead.Status).toLowerCase() === 'fechado';
+            // If there's closedAt, assume closed
             if (lead.closedAt) return true;
-            // Fallback: incluir se createdAt/Data existir (menos comum)
-            if (lead.Data || lead.createdAt) return true;
+            // fallback: include if Data or createdAt exists
+            if (lead.raw?.Data || lead.createdAt) return true;
             return false;
         });
 
-        // Sincronização de estados (valores, vigencias, names)
+        // Sync valores (PremioLiquido in cents, Comissao string/number, Parcelamento, insurer, MeioPagamento, CartaoPortoNovo)
         setValores(prevValores => {
             const novosValores = { ...prevValores };
+
             fechadosAtuais.forEach(lead => {
-                const rawPremioFromApi = String(lead.raw?.PremioLiquido ?? lead.raw?.premioLiquido ?? '');
-                const premioFromApi = parseFloat(rawPremioFromApi.replace('.', '').replace(',', '.'));
-                const premioInCents = isNaN(premioFromApi) || rawPremioFromApi === '' ? null : Math.round(premioFromApi * 100);
+                const raw = lead.raw || {};
+                const leadKey = String(lead.ID ?? lead.id ?? '');
 
-                const apiComissao = lead.raw?.Comissao ? String(lead.raw?.Comissao).replace('.', ',') : '';
-                const apiParcelamento = lead.raw?.Parcelamento ?? lead.raw?.parcelamento ?? '';
-                const apiInsurer = lead.raw?.Seguradora ?? lead.raw?.insurer ?? '';
+                // parse premio
+                const rawPremio = raw.PremioLiquido ?? raw.premioLiquido ?? raw.Premio ?? '';
+                const parsedPremioFloat = parseCurrencyToFloat(rawPremio); // e.g. 1234.56
+                const premioInCents = isNaN(parsedPremioFloat) ? null : Math.round(parsedPremioFloat * 100);
 
-                const apiMeioPagamento = lead.raw?.MeioPagamento ?? lead.raw?.MeioPagamento ?? '';
-                const apiCartaoPortoNovo = lead.raw?.CartaoPortoNovo ?? '';
+                // parse comissao raw - aceita "10%", "10,5", "10"
+                let apiComissao = raw.Comissao ?? raw.comissao ?? '';
+                if (apiComissao !== '' && typeof apiComissao !== 'string') {
+                    apiComissao = String(apiComissao);
+                }
 
-                if (!novosValores[lead.ID] ||
-                    (novosValores[lead.ID].PremioLiquido === undefined && premioInCents !== null) ||
-                    (novosValores[lead.ID].Comissao === undefined && apiComissao !== '') ||
-                    (novosValores[lead.ID].Parcelamento === undefined && apiParcelamento !== '') ||
-                    (novosValores[lead.ID].insurer === undefined && apiInsurer !== '') ||
-                    (novosValores[lead.ID].MeioPagamento === undefined && apiMeioPagamento !== '') ||
-                    (novosValores[lead.ID].CartaoPortoNovo === undefined && apiCartaoPortoNovo !== '')
-                ) {
-                    novosValores[lead.ID] = {
-                        ...novosValores[lead.ID],
-                        PremioLiquido: premioInCents,
-                        Comissao: apiComissao,
-                        Parcelamento: apiParcelamento,
-                        insurer: apiInsurer,
-                        MeioPagamento: apiMeioPagamento,
-                        CartaoPortoNovo: apiCartaoPortoNovo,
-                    };
+                // parse parcelamento
+                const apiParcelamento = raw.Parcelamento ?? raw.parcelamento ?? raw.Parcelas ?? '';
+
+                const apiInsurer = raw.Seguradora ?? raw.insurer ?? raw.seguradora ?? '';
+                const apiMeioPagamento = raw.MeioPagamento ?? raw.meioPagamento ?? raw.Meiopagamento ?? '';
+                const apiCartaoPortoNovo = raw.CartaoPortoNovo ?? raw.cartaoPortoNovo ?? raw.Cartao ?? '';
+
+                // If there is no entry or fields are undefined, set them
+                if (!novosValores[leadKey]) novosValores[leadKey] = {};
+
+                // Only set if value is meaningful or not yet present (to avoid overwriting edited local values)
+                if ((novosValores[leadKey].PremioLiquido === undefined || novosValores[leadKey].PremioLiquido === null) && premioInCents !== null) {
+                    novosValores[leadKey].PremioLiquido = premioInCents;
+                } else if (novosValores[leadKey].PremioLiquido === undefined) {
+                    novosValores[leadKey].PremioLiquido = null;
+                }
+
+                if ((novosValores[leadKey].Comissao === undefined || novosValores[leadKey].Comissao === '') && apiComissao !== '') {
+                    // normalize "10%" => "10%" or "10,5" => "10,5"
+                    novosValores[leadKey].Comissao = typeof apiComissao === 'string' ? apiComissao : String(apiComissao);
+                } else if (novosValores[leadKey].Comissao === undefined) {
+                    novosValores[leadKey].Comissao = '';
+                }
+
+                if ((novosValores[leadKey].Parcelamento === undefined || novosValores[leadKey].Parcelamento === '') && apiParcelamento !== '') {
+                    novosValores[leadKey].Parcelamento = String(apiParcelamento);
+                } else if (novosValores[leadKey].Parcelamento === undefined) {
+                    novosValores[leadKey].Parcelamento = '';
+                }
+
+                if ((novosValores[leadKey].insurer === undefined || novosValores[leadKey].insurer === '') && apiInsurer !== '') {
+                    novosValores[leadKey].insurer = String(apiInsurer);
+                } else if (novosValores[leadKey].insurer === undefined) {
+                    novosValores[leadKey].insurer = '';
+                }
+
+                if ((novosValores[leadKey].MeioPagamento === undefined || novosValores[leadKey].MeioPagamento === '') && apiMeioPagamento !== '') {
+                    novosValores[leadKey].MeioPagamento = String(apiMeioPagamento);
+                } else if (novosValores[leadKey].MeioPagamento === undefined) {
+                    novosValores[leadKey].MeioPagamento = '';
+                }
+
+                if ((novosValores[leadKey].CartaoPortoNovo === undefined || novosValores[leadKey].CartaoPortoNovo === '') && apiCartaoPortoNovo !== '') {
+                    novosValores[leadKey].CartaoPortoNovo = String(apiCartaoPortoNovo);
+                } else if (novosValores[leadKey].CartaoPortoNovo === undefined) {
+                    novosValores[leadKey].CartaoPortoNovo = '';
                 }
             });
+
             return novosValores;
         });
 
-        // Sincronização do estado de Nome Temporário
+        // Sync Nome temporario
         setNomeTemporario(prevNomes => {
             const novosNomes = { ...prevNomes };
             fechadosAtuais.forEach(lead => {
-                if (novosNomes[lead.ID] === undefined) {
-                    novosNomes[lead.ID] = lead.name || lead.Name || '';
+                const leadKey = String(lead.ID ?? lead.id ?? '');
+                if (novosNomes[leadKey] === undefined || novosNomes[leadKey] === '') {
+                    novosNomes[leadKey] = lead.name || lead.Name || lead.Nome || '';
                 }
             });
             return novosNomes;
         });
 
+        // Sync display for premioLiquido
         setPremioLiquidoInputDisplay(prevDisplay => {
             const newDisplay = { ...prevDisplay };
             fechadosAtuais.forEach(lead => {
-                const currentPremio = String(lead.raw?.PremioLiquido ?? '');
-                if (currentPremio !== '') {
-                    const premioFloat = parseFloat(currentPremio.toString().replace(',', '.'));
-                    newDisplay[lead.ID] = isNaN(premioFloat) ? '' : premioFloat.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                } else if (prevDisplay[lead.ID] === undefined) {
-                    newDisplay[lead.ID] = '';
+                const leadKey = String(lead.ID ?? lead.id ?? '');
+                const rawPremio = lead.raw?.PremioLiquido ?? lead.raw?.premioLiquido ?? lead.raw?.Premio ?? '';
+                const parsed = parseCurrencyToFloat(rawPremio);
+                if (!isNaN(parsed)) {
+                    // formatted like "1.234,56"
+                    newDisplay[leadKey] = parsed.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                } else {
+                    // If we already had a display value (local), keep it; otherwise empty
+                    if (prevDisplay[leadKey] === undefined) newDisplay[leadKey] = '';
                 }
             });
             return newDisplay;
         });
 
+        // Sync vigencia (inicio/final) using parseDateToInputValue
         setVigencia(prevVigencia => {
             const novasVigencias = { ...prevVigencia };
             fechadosAtuais.forEach(lead => {
-                const vigenciaInicioStrApi = String(lead.raw?.VigenciaInicial ?? lead.raw?.vigenciaInicial ?? '');
-                const vigenciaFinalStrApi = String(lead.raw?.VigenciaFinal ?? lead.raw?.vigenciaFinal ?? '');
+                const leadKey = String(lead.ID ?? lead.id ?? '');
 
-                if (!novasVigencias[lead.ID] || (novasVigencias[lead.ID].inicio === undefined && vigenciaInicioStrApi !== '')) {
-                    novasVigencias[lead.ID] = { ...novasVigencias[lead.ID], inicio: vigenciaInicioStrApi };
+                const vigenciaInicioRaw = lead.raw?.VigenciaInicial ?? lead.raw?.vigenciaInicial ?? lead.raw?.VigenciaInicio ?? '';
+                const vigenciaFinalRaw = lead.raw?.VigenciaFinal ?? lead.raw?.vigenciaFinal ?? lead.raw?.VigenciaFim ?? '';
+
+                const parsedInicio = parseDateToInputValue(vigenciaInicioRaw);
+                const parsedFinal = parseDateToInputValue(vigenciaFinalRaw);
+
+                if (!novasVigencias[leadKey]) novasVigencias[leadKey] = { inicio: '', final: '' };
+
+                // If parsed value exists and not already set locally (or empty), set it
+                if (parsedInicio && (!novasVigencias[leadKey].inicio || novasVigencias[leadKey].inicio === '')) {
+                    novasVigencias[leadKey].inicio = parsedInicio;
+                } else if (!novasVigencias[leadKey].inicio && parsedInicio === '') {
+                    // fallback: try to infer from Data or closedAt
+                    if (!novasVigencias[leadKey].inicio) {
+                        // do nothing
+                    }
                 }
-                if (!novasVigencias[lead.ID] || (novasVigencias[lead.ID].final === undefined && vigenciaFinalStrApi !== '')) {
-                    novasVigencias[lead.ID] = { ...novasVigencias[lead.ID], final: vigenciaFinalStrApi };
+
+                if (parsedFinal && (!novasVigencias[leadKey].final || novasVigencias[leadKey].final === '')) {
+                    novasVigencias[leadKey].final = parsedFinal;
+                } else if (!novasVigencias[leadKey].final && parsedFinal === '') {
+                    // if only inicio exists, compute final = +1 year
+                    if (novasVigencias[leadKey].inicio && !novasVigencias[leadKey].final) {
+                        try {
+                            const d = new Date(novasVigencias[leadKey].inicio + 'T00:00:00');
+                            d.setFullYear(d.getFullYear() + 1);
+                            const y = d.getFullYear();
+                            const m = String(d.getMonth() + 1).padStart(2, '0');
+                            const day = String(d.getDate()).padStart(2, '0');
+                            novasVigencias[leadKey].final = `${y}-${m}-${day}`;
+                        } catch (e) {
+                            // ignore
+                        }
+                    }
                 }
             });
             return novasVigencias;
@@ -358,8 +523,8 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
                     if (!isNaN(d.getTime())) return d.getTime();
                 }
                 // fallback Data (DD/MM/YYYY)
-                if (lead.Data) {
-                    const iso = getDataParaComparacao(lead.Data);
+                if (lead.raw?.Data) {
+                    const iso = getDataParaComparacao(lead.raw?.Data);
                     if (iso) {
                         const d = new Date(iso + 'T00:00:00');
                         if (!isNaN(d.getTime())) return d.getTime();
@@ -394,9 +559,17 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
                     return monthYearFromClosedAt === filtroData;
                 }
                 // fallback para Data (DD/MM/YYYY ou AAAA-MM-DD)
-                const dataLeadFormatada = lead.Data ? getDataParaComparacao(lead.Data) : '';
-                const dataLeadMesAno = dataLeadFormatada ? dataLeadFormatada.substring(0, 7) : '';
-                return dataLeadMesAno === filtroData;
+                const dataLeadRaw = lead.raw?.Data ?? lead.raw?.data ?? lead.createdAt ?? '';
+                const dataLeadFormatada = dataLeadRaw ? (getMonthYearFromDateInput(dataLeadRaw) || (getDataParaComparacao(String(dataLeadRaw)) || '').substring(0, 7)) : '';
+                if (dataLeadFormatada) return dataLeadFormatada === filtroData;
+
+                // fallback try vigencia final/inicio
+                const vigIni = vigencia[lead.ID]?.inicio || '';
+                if (vigIni && vigIni.substring(0, 7) === filtroData) return true;
+                const vigFim = vigencia[lead.ID]?.final || '';
+                if (vigFim && vigFim.substring(0, 7) === filtroData) return true;
+
+                return false;
             });
         } else {
             leadsFiltrados = fechadosOrdenados;
@@ -416,7 +589,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
     const handleNomeBlur = (id, novoNome) => {
         const nomeAtualizado = novoNome.trim();
         const lead = (leadsFromFirebase || []).find(l => String(l.ID) === String(id) || String(l.id) === String(id));
-        if (lead && lead.name !== nomeAtualizado) {
+        if (lead && (lead.name || lead.Name || lead.Nome) !== nomeAtualizado) {
             if (nomeAtualizado) {
                 setNomeTemporario(prev => ({
                     ...prev,
@@ -436,6 +609,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
     const handlePremioLiquidoChange = (id, valor) => {
         let cleanedValue = valor.replace(/[^\d,\.]/g, '');
         const commaParts = cleanedValue.split(',');
+
         if (commaParts.length > 2) {
             cleanedValue = commaParts[0] + ',' + commaParts.slice(1).join('');
         }
@@ -448,6 +622,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
             [`${id}`]: cleanedValue,
         }));
 
+        // Parsing to cents: remove dots, replace comma with dot, parse float
         const valorParaParse = cleanedValue.replace(/\./g, '').replace(',', '.');
         const valorEmReais = parseFloat(valorParaParse);
         const valorParaEstado = isNaN(valorEmReais) || cleanedValue === '' ? null : Math.round(valorEmReais * 100);
@@ -705,22 +880,31 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
                         const isSeguradoraPreenchida = !!(lead.raw?.Seguradora || lead.raw?.insurer || lead.raw?.Seguradora);
 
                         // Variáveis de estado para a lógica condicional
-                        const currentInsurer = valores[`${leadKey}`]?.insurer || '';
-                        const currentMeioPagamento = valores[`${leadKey}`]?.MeioPagamento || '';
+                        const currentInsurer = valores[`${leadKey}`]?.insurer || (lead.raw?.Seguradora ?? lead.raw?.insurer ?? '');
+                        const currentMeioPagamento = valores[`${leadKey}`]?.MeioPagamento || (lead.raw?.MeioPagamento ?? lead.raw?.meioPagamento ?? '');
                         const isPortoInsurer = ['Porto Seguro', 'Azul Seguros', 'Itau Seguros'].includes(currentInsurer);
                         const isCPPayment = currentMeioPagamento === 'CP';
 
                         const showCartaoPortoNovo = isPortoInsurer && isCPPayment;
 
                         const isButtonDisabled =
-                            !valores[`${leadKey}`]?.insurer &&
-                            (valores[`${leadKey}`]?.PremioLiquido === null || valores[`${leadKey}`]?.PremioLiquido === undefined) ||
-                            !valores[`${leadKey}`]?.Comissao ||
-                            parseFloat(String(valores[`${leadKey}`]?.Comissao || '0').replace(',', '.')) === 0 ||
-                            !valores[`${leadKey}`]?.Parcelamento ||
-                            valores[`${leadKey}`]?.Parcelamento === '' ||
-                            !vigencia[`${leadKey}`]?.inicio ||
-                            !vigencia[`${leadKey}`]?.final;
+                            (
+                                !(valores[`${leadKey}`]?.insurer || (lead.raw?.Seguradora ?? lead.raw?.insurer)) ||
+                                (valores[`${leadKey}`]?.PremioLiquido === null || valores[`${leadKey}`]?.PremioLiquido === undefined) ||
+                                !valores[`${leadKey}`]?.Comissao ||
+                                parseFloat(String(valores[`${leadKey}`]?.Comissao || '0').replace(',', '.')) === 0 ||
+                                !valores[`${leadKey}`]?.Parcelamento ||
+                                valores[`${leadKey}`]?.Parcelamento === '' ||
+                                !vigencia[`${leadKey}`]?.inicio ||
+                                !vigencia[`${leadKey}`]?.final
+                            );
+
+                        // Show formatted values (fall back to local state or raw)
+                        const displayPremio = premioLiquidoInputDisplay[`${leadKey}`] ?? (
+                            (valores[`${leadKey}`]?.PremioLiquido !== undefined && valores[`${leadKey}`]?.PremioLiquido !== null)
+                                ? formatarMoeda(valores[`${leadKey}`].PremioLiquido)
+                                : (parseCurrencyToFloat(lead.raw?.PremioLiquido ?? lead.raw?.premioLiquido ?? '') ? (parseCurrencyToFloat(lead.raw?.PremioLiquido ?? lead.raw?.premioLiquido ?? '')).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '')
+                        );
 
                         return (
                             <div
@@ -844,7 +1028,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
                                                 <input
                                                     type="text"
                                                     placeholder="0,00"
-                                                    value={premioLiquidoInputDisplay[`${leadKey}`] || ''}
+                                                    value={displayPremio || ''}
                                                     onChange={(e) => handlePremioLiquidoChange(leadKey, e.target.value)}
                                                     onBlur={() => handlePremioLiquidoBlur(leadKey)}
                                                     disabled={!!(lead.raw?.Seguradora || lead.raw?.insurer)}
@@ -860,7 +1044,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
                                                 <input
                                                     type="text"
                                                     placeholder="0,00"
-                                                    value={valores[`${leadKey}`]?.Comissao || ''}
+                                                    value={valores[`${leadKey}`]?.Comissao || (lead.raw?.Comissao ?? '')}
                                                     onChange={(e) => handleComissaoChange(leadKey, e.target.value)}
                                                     onBlur={() => handleComissaoBlur(leadKey)}
                                                     disabled={!!(lead.raw?.Seguradora || lead.raw?.insurer)}
@@ -872,7 +1056,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
                                         <div className="col-span-2">
                                             <label className="text-xs font-semibold text-gray-600 block mb-1">Parcelamento</label>
                                             <select
-                                                value={valores[`${leadKey}`]?.Parcelamento || ''}
+                                                value={valores[`${leadKey}`]?.Parcelamento || (lead.raw?.Parcelamento ?? '')}
                                                 onChange={(e) => handleParcelamentoChange(leadKey, e.target.value)}
                                                 disabled={!!(lead.raw?.Seguradora || lead.raw?.insurer)}
                                                 className="w-full p-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500"
@@ -900,7 +1084,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
                                         <input
                                             id={`vigencia-inicio-${leadKey}`}
                                             type="date"
-                                            value={vigencia[`${leadKey}`]?.inicio || ''}
+                                            value={vigencia[`${leadKey}`]?.inicio || parseDateToInputValue(lead.raw?.VigenciaInicial ?? lead.raw?.vigenciaInicial ?? '') || ''}
                                             onChange={(e) => handleVigenciaInicioChange(leadKey, e.target.value)}
                                             disabled={!!(lead.raw?.Seguradora || lead.raw?.insurer)}
                                             className="w-full p-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500"
@@ -913,7 +1097,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
                                         <input
                                             id={`vigencia-final-${leadKey}`}
                                             type="date"
-                                            value={vigencia[`${leadKey}`]?.final || ''}
+                                            value={vigencia[`${leadKey}`]?.final || parseDateToInputValue(lead.raw?.VigenciaFinal ?? lead.raw?.vigenciaFinal ?? '') || ''}
                                             readOnly
                                             disabled={true}
                                             className="w-full p-2 border border-gray-200 rounded-lg text-sm bg-gray-100 cursor-not-allowed"
@@ -924,18 +1108,17 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
                                     {!isSeguradoraPreenchida ? (
                                         <button
                                             onClick={async () => {
-                                                // Aqui usamos docId (id do documento Firestore) para chamar o handler do parent,
-                                                // pois o parent costuma procurar pelo id do documento.
+                                                // Use docId for parent handlers
                                                 await onConfirmInsurer(
                                                     docId ?? leadKey,
                                                     valores[`${leadKey}`]?.PremioLiquido === null ? null : valores[`${leadKey}`]?.PremioLiquido / 100,
-                                                    valores[`${leadKey}`]?.insurer, // Valor da seguradora local
-                                                    parseFloat(String(valores[`${leadKey}`]?.Comissao || '0').replace(',', '.')),
-                                                    valores[`${leadKey}`]?.Parcelamento,
-                                                    vigencia[`${leadKey}`]?.inicio,
-                                                    vigencia[`${leadKey}`]?.final,
-                                                    valores[`${leadKey}`]?.MeioPagamento || '',
-                                                    valores[`${leadKey}`]?.CartaoPortoNovo || ''
+                                                    valores[`${leadKey}`]?.insurer || lead.raw?.Seguradora || lead.raw?.insurer || '',
+                                                    parseFloat(String(valores[`${leadKey}`]?.Comissao || (lead.raw?.Comissao ?? '0')).replace(',', '.')),
+                                                    valores[`${leadKey}`]?.Parcelamento || lead.raw?.Parcelamento || lead.raw?.parcelamento || '',
+                                                    vigencia[`${leadKey}`]?.inicio || parseDateToInputValue(lead.raw?.VigenciaInicial ?? lead.raw?.vigenciaInicial ?? ''),
+                                                    vigencia[`${leadKey}`]?.final || parseDateToInputValue(lead.raw?.VigenciaFinal ?? lead.raw?.vigenciaFinal ?? ''),
+                                                    valores[`${leadKey}`]?.MeioPagamento || lead.raw?.MeioPagamento || '',
+                                                    valores[`${leadKey}`]?.CartaoPortoNovo || lead.raw?.CartaoPortoNovo || ''
                                                 );
                                             }}
                                             disabled={isButtonDisabled}
