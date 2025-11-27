@@ -122,11 +122,11 @@ const LeadsFechados = ({ usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDe
                 Seguradora: doc.data().Seguradora,
                 MeioPagamento: doc.data().MeioPagamento,
                 CartaoPortoNovo: doc.data().CartaoPortoNovo,
-                PremioLiquido: doc.data().PremioLiquido,
+                PremioLiquido: doc.data().PremioLiquido ? parseFloat(doc.data().PremioLiquido.replace('R$', '').replace('.', '').replace(',', '.')) : null,
                 Comissao: doc.data().Comissao,
                 Parcelamento: doc.data().Parcelamento,
-                VigenciaInicial: doc.data().VigenciaInicial,
-                VigenciaFinal: doc.data().VigenciaFinal,
+                VigenciaInicial: doc.data().VigenciaInicial ? doc.data().VigenciaInicial.split('T')[0] : '',
+                VigenciaFinal: doc.data().VigenciaFinal ? doc.data().VigenciaFinal.split('T')[0] : '',
             }));
             setLeadsFirebase(fetchedLeads);
         } catch (error) {
@@ -232,7 +232,7 @@ const LeadsFechados = ({ usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDe
         // ORDENAÇÃO
         const fechadosOrdenados = [...fechadosAtuais].sort((a, b) => {
             const dataA = new Date(getDataParaComparacao(a.Data) + 'T00:00:00');
-            const dataB = new Date(getDataParaComparacao(b.Data) + 'T00:00:00');
+            const dataB = new Date(new Date(getDataParaComparacao(b.Data) + 'T00:00:00'));
             return dataB.getTime() - dataA.getTime();
         });
 
@@ -509,7 +509,7 @@ const LeadsFechados = ({ usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDe
             <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
                 <div className="flex flex-wrap items-center justify-between gap-4 border-b pb-4 mb-4">
                     <h1 className="text-4xl font-extrabold text-gray-900 flex items-center">
-                        <CheckCircle size={32} className="mr-3 text-green-500" />
+                        <CheckCircle size={32} className="text-green-500 mr-3" />
                         Leads Fechados
                     </h1>
 
@@ -532,28 +532,28 @@ const LeadsFechados = ({ usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDe
                             placeholder="Buscar por nome..."
                             value={nomeInput}
                             onChange={(e) => setNomeInput(e.target.value)}
-                            className="flex-grow p-3 border border-gray-300 rounded-lg text-sm focus:border-green-500 focus:ring-green-500"
+                            className="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500 text-sm"
                         />
                         <button
                             onClick={aplicarFiltroNome}
-                            className="p-3 text-white transition duration-200 bg-green-500 rounded-lg shadow-md hover:bg-green-600"
+                            className="p-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition duration-200 shadow-md"
                         >
                             <Search size={20} />
                         </button>
                     </div>
 
                     {/* Filtro de Data */}
-                    <div className="flex items-center justify-end flex-1 gap-2 min-w-[200px]">
+                    <div className="flex items-center gap-2 flex-1 min-w-[200px] justify-end">
                         <input
                             type="month"
                             value={dataInput}
                             onChange={(e) => setDataInput(e.target.value)}
-                            className="p-3 border border-gray-300 rounded-lg text-sm cursor-pointer"
+                            className="p-3 border border-gray-300 rounded-lg cursor-pointer text-sm"
                             title="Filtrar por Mês/Ano de Criação"
                         />
                         <button
                             onClick={aplicarFiltroData}
-                            className="p-3 text-white transition duration-200 bg-green-500 rounded-lg shadow-md whitespace-nowrap hover:bg-green-600"
+                            className="p-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition duration-200 shadow-md whitespace-nowrap"
                         >
                             Filtrar Data
                         </button>
@@ -564,7 +564,7 @@ const LeadsFechados = ({ usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDe
             {/* Lista de Cards de Leads */}
             <div className="space-y-5">
                 {fechadosFiltradosInterno.length === 0 && !isLoading ? (
-                    <div className="p-12 text-lg text-center text-gray-600 bg-white rounded-xl shadow-md">
+                    <div className="text-center p-12 bg-white rounded-xl shadow-md text-gray-600 text-lg">
                         <p> Você ainda não tem nenhum fechamento, mas logo terá! 😉  </p>
                     </div>
                 ) : (
@@ -597,10 +597,10 @@ const LeadsFechados = ({ usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDe
                         return (
                             <div
                                 key={lead.ID}
-                                className={`grid grid-cols-1 gap-6 p-5 transition duration-300 bg-white border-t-4 rounded-xl shadow-lg hover:shadow-xl md:grid-cols-2 lg:grid-cols-3 relative ${isSeguradoraPreenchida ? 'border-green-600' : 'border-amber-500'}`}
+                                className={`bg-white rounded-xl shadow-lg hover:shadow-xl transition duration-300 p-5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 relative border-t-4 ${isSeguradoraPreenchida ? 'border-green-600' : 'border-amber-500'}`}
                             >
                                 {/* COLUNA 1: Informações do Lead */}
-                                <div className="col-span-1 pb-4 border-b lg:border-r lg:pb-0 lg:pr-6">
+                                <div className="col-span-1 border-b pb-4 lg:border-r lg:pb-0 lg:pr-6">
 
                                     {/* >>> NOVO: Lógica de Edição de Nome do Lead (SEMPRE ABERTO OU BLOQUEADO) <<< */}
                                     <div className="flex items-center gap-2 mb-2">
@@ -621,10 +621,10 @@ const LeadsFechados = ({ usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDe
                                                         }
                                                         // A lógica de 'Escape' foi removida, o campo fica sempre aberto até o blur.
                                                     }}
-                                                    className="p-1 text-xl font-bold text-gray-900 border border-indigo-300 rounded-lg focus:border-indigo-500 focus:ring-indigo-500"
+                                                    className="text-xl font-bold text-gray-900 border border-indigo-300 rounded-lg p-1 focus:ring-indigo-500 focus:border-indigo-500"
                                                     // autoFocus removido para evitar problemas de foco em múltiplos componentes
                                                 />
-                                                <span className='mt-1 text-xs text-gray-500'>Atualize o nome com o mesmo da proposta.</span>
+                                                <span className='text-xs text-gray-500 mt-1'>Atualize o nome com o mesmo da proposta.</span>
                                             </div>
                                         )}
                                         {/* O botão de edição foi removido */}
@@ -641,27 +641,27 @@ const LeadsFechados = ({ usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDe
                                     </div>
 
                                     {responsavel && (
-                                        <p className="p-2 mt-4 text-sm font-semibold text-green-600 bg-green-50 rounded-lg">
+                                        <p className="mt-4 text-sm font-semibold text-green-600 bg-green-50 p-2 rounded-lg">
                                             Transferido para: <strong>{responsavel.nome}</strong>
                                         </p>
                                     )}
                                 </div>
 
                                 {/* COLUNA 2: Detalhes do Fechamento */}
-                                <div className="col-span-1 pb-4 border-b lg:border-r lg:pb-0 lg:px-6">
-                                    <h3 className="flex items-center mb-3 text-lg font-bold text-gray-800">
+                                <div className="col-span-1 border-b pb-4 lg:border-r lg:pb-0 lg:px-6">
+                                    <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center">
                                         <DollarSign size={18} className="mr-2 text-green-500" />
                                         Detalhes do Fechamento
                                     </h3>
 
                                     {/* 1. Seguradora (Select) */}
                                     <div className="mb-4">
-                                        <label className="block mb-1 text-xs font-semibold text-gray-600">Seguradora</label>
+                                        <label className="text-xs font-semibold text-gray-600 block mb-1">Seguradora</label>
                                         <select
                                             value={valores[`${lead.ID}`]?.insurer || ''}
                                             onChange={(e) => handleInsurerChange(lead.ID, e.target.value)}
                                             disabled={isSeguradoraPreenchida}
-                                            className="w-full p-2 text-sm transition duration-150 border rounded-lg border-gray-300 disabled:cursor-not-allowed disabled:bg-gray-100 focus:border-green-500 focus:ring-green-500"
+                                            className="w-full p-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500"
                                         >
                                             <option value="">Selecione a seguradora</option>
                                             <option value="Porto Seguro">Porto Seguro</option>
@@ -683,12 +683,12 @@ const LeadsFechados = ({ usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDe
 
                                     {/* 2. Meio de Pagamento (Select) - RELOCADO */}
                                     <div className="mb-4">
-                                        <label className="block mb-1 text-xs font-semibold text-gray-600">Meio de Pagamento</label>
+                                        <label className="text-xs font-semibold text-gray-600 block mb-1">Meio de Pagamento</label>
                                         <select
                                             value={valores[`${lead.ID}`]?.MeioPagamento || ''}
                                             onChange={(e) => handleMeioPagamentoChange(lead.ID, e.target.value)}
                                             disabled={isSeguradoraPreenchida}
-                                            className="w-full p-2 text-sm transition duration-150 border rounded-lg border-gray-300 disabled:cursor-not-allowed disabled:bg-gray-100 focus:border-green-500 focus:ring-green-500"
+                                            className="w-full p-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500"
                                         >
                                             <option value=""> </option>
                                             <option value="CP">CP</option>
@@ -701,12 +701,12 @@ const LeadsFechados = ({ usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDe
                                     {/* 3. Cartão Porto Seguro Novo? (Select) - CONDICIONAL E RELOCADO */}
                                     {showCartaoPortoNovo && (
                                         <div className="mb-4">
-                                            <label className="block mb-1 text-xs font-semibold text-gray-600">Cartão Porto Seguro Novo?</label>
+                                            <label className="text-xs font-semibold text-gray-600 block mb-1">Cartão Porto Seguro Novo?</label>
                                             <select
                                                 value={valores[`${lead.ID}`]?.CartaoPortoNovo || ''}
                                                 onChange={(e) => handleCartaoPortoChange(lead.ID, e.target.value)}
                                                 disabled={isSeguradoraPreenchida}
-                                                className="w-full p-2 text-sm transition duration-150 border rounded-lg border-gray-300 disabled:cursor-not-allowed disabled:bg-gray-100 focus:border-green-500 focus:ring-green-500"
+                                                className="w-full p-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500"
                                             >
                                                 <option value=""> </option>
                                                 <option value="Sim">Sim</option>
@@ -719,9 +719,9 @@ const LeadsFechados = ({ usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDe
                                     <div className="grid grid-cols-2 gap-3 mt-4"> {/* Adicionado mt-4 para espaçamento após os novos campos */}
                                         {/* Prêmio Líquido (Input) */}
                                         <div>
-                                            <label className="block mb-1 text-xs font-semibold text-gray-600">Prêmio Líquido</label>
+                                            <label className="text-xs font-semibold text-gray-600 block mb-1">Prêmio Líquido</label>
                                             <div className="relative">
-                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold text-sm">R$</span>
+                                                <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 font-bold text-sm">R$</span>
                                                 <input
                                                     type="text"
                                                     placeholder="0,00"
@@ -729,16 +729,16 @@ const LeadsFechados = ({ usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDe
                                                     onChange={(e) => handlePremioLiquidoChange(lead.ID, e.target.value)}
                                                     onBlur={() => handlePremioLiquidoBlur(lead.ID)}
                                                     disabled={isSeguradoraPreenchida}
-                                                    className="w-full p-2 pl-8 text-sm text-right transition duration-150 border rounded-lg border-gray-300 disabled:cursor-not-allowed disabled:bg-gray-100 focus:border-green-500 focus:ring-green-500"
+                                                    className="w-full p-2 pl-8 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500 text-right"
                                                 />
                                             </div>
                                         </div>
 
                                         {/* Comissão (Input) */}
                                         <div>
-                                            <label className="block mb-1 text-xs font-semibold text-gray-600">Comissão (%)</label>
+                                            <label className="text-xs font-semibold text-gray-600 block mb-1">Comissão (%)</label>
                                             <div className="relative">
-                                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-bold text-sm">%</span>
+                                                <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 font-bold text-sm">%</span>
                                                 <input
                                                     type="text"
                                                     placeholder="0,00"
@@ -746,19 +746,19 @@ const LeadsFechados = ({ usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDe
                                                     onChange={(e) => handleComissaoChange(lead.ID, e.target.value)}
                                                     onBlur={() => handleComissaoBlur(lead.ID)}
                                                     disabled={isSeguradoraPreenchida}
-                                                    className="w-full p-2 pl-8 text-sm text-right transition duration-150 border rounded-lg border-gray-300 disabled:cursor-not-allowed disabled:bg-gray-100 focus:border-green-500 focus:ring-green-500"
+                                                    className="w-full p-2 pl-8 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500 text-right"
                                                 />
                                             </div>
                                         </div>
 
                                         {/* Parcelamento (Select) */}
                                         <div className="col-span-2">
-                                            <label className="block mb-1 text-xs font-semibold text-gray-600">Parcelamento</label>
+                                            <label className="text-xs font-semibold text-gray-600 block mb-1">Parcelamento</label>
                                             <select
                                                 value={valores[`${lead.ID}`]?.Parcelamento || ''}
                                                 onChange={(e) => handleParcelamentoChange(lead.ID, e.target.value)}
                                                 disabled={isSeguradoraPreenchida}
-                                                className="w-full p-2 text-sm transition duration-150 border rounded-lg border-gray-300 disabled:cursor-not-allowed disabled:bg-gray-100 focus:border-green-500 focus:ring-green-500"
+                                                className="w-full p-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500"
                                             >
                                                 <option value="">Selecione o Parcelamento</option>
                                                 {[...Array(12)].map((_, i) => (
@@ -772,34 +772,34 @@ const LeadsFechados = ({ usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDe
 
                                 {/* COLUNA 3: Vigência e Ação de Confirmação */}
                                 <div className="col-span-1 lg:pl-6">
-                                    <h3 className="flex items-center mb-3 text-lg font-bold text-gray-800">
+                                    <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center">
                                         <Calendar size={18} className="mr-2 text-green-500" />
                                         Vigência
                                     </h3>
 
                                     {/* Vigência Início */}
                                     <div className="mb-4">
-                                        <label htmlFor={`vigencia-inicio-${lead.ID}`} className="block mb-1 text-xs font-semibold text-gray-600">Início</label>
+                                        <label htmlFor={`vigencia-inicio-${lead.ID}`} className="text-xs font-semibold text-gray-600 block mb-1">Início</label>
                                         <input
                                             id={`vigencia-inicio-${lead.ID}`}
                                             type="date"
                                             value={vigencia[`${lead.ID}`]?.inicio || ''}
                                             onChange={(e) => handleVigenciaInicioChange(lead.ID, e.target.value)}
                                             disabled={isSeguradoraPreenchida}
-                                            className="w-full p-2 text-sm transition duration-150 border rounded-lg border-gray-300 disabled:cursor-not-allowed disabled:bg-gray-100 focus:border-green-500 focus:ring-green-500"
+                                            className="w-full p-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500"
                                         />
                                     </div>
 
                                     {/* Vigência Final (Readonly) */}
                                     <div className="mb-6">
-                                        <label htmlFor={`vigencia-final-${lead.ID}`} className="block mb-1 text-xs font-semibold text-gray-600">Término (Automático)</label>
+                                        <label htmlFor={`vigencia-final-${lead.ID}`} className="text-xs font-semibold text-gray-600 block mb-1">Término (Automático)</label>
                                         <input
                                             id={`vigencia-final-${lead.ID}`}
                                             type="date"
                                             value={vigencia[`${lead.ID}`]?.final || ''}
                                             readOnly
                                             disabled={true}
-                                            className="w-full p-2 text-sm bg-gray-100 border border-gray-200 rounded-lg cursor-not-allowed"
+                                            className="w-full p-2 border border-gray-200 rounded-lg text-sm bg-gray-100 cursor-not-allowed"
                                         />
                                     </div>
 
@@ -822,17 +822,17 @@ const LeadsFechados = ({ usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDe
                                             }}
                                             disabled={isButtonDisabled}
                                             title={isButtonDisabled ? 'Preencha todos os campos para confirmar.' : 'Confirmar e finalizar renovação.'}
-                                            className={`flex items-center justify-center w-full py-3 font-bold text-white transition duration-300 rounded-xl shadow-lg ${
+                                            className={`w-full py-3 rounded-xl font-bold transition duration-300 shadow-lg flex items-center justify-center ${
                                                 isButtonDisabled
-                                                    ? 'cursor-not-allowed bg-gray-300 text-gray-600'
-                                                    : 'bg-green-600 hover:bg-green-700'
+                                                    ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                                                    : 'bg-green-600 text-white hover:bg-green-700'
                                             }`}
                                         >
                                             <CheckCircle size={20} className="mr-2" />
                                             Concluir Venda!
                                         </button>
                                     ) : (
-                                        <div className="flex items-center justify-center w-full px-4 py-3 font-bold text-green-700 bg-green-100 border border-green-300 rounded-xl">
+                                        <div className="w-full py-3 px-4 rounded-xl font-bold bg-green-100 text-green-700 flex items-center justify-center border border-green-300">
                                             <CheckCircle size={20} className="mr-2" />
                                             Fechado!
                                         </div>
@@ -846,31 +846,31 @@ const LeadsFechados = ({ usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDe
 
             {/* Rodapé e Paginação */}
             {fechadosFiltradosInterno.length > 0 && (
-                <div className="flex justify-center p-4 mt-8 bg-white rounded-xl shadow-lg">
-                    <div className="flex items-center gap-4 mt-8 pb-8">
+                <div className="mt-8 flex justify-center bg-white p-4 rounded-xl shadow-lg">
+                    <div className="flex justify-center items-center gap-4 mt-8 pb-8">
                         <button
                             onClick={handlePaginaAnterior}
                             disabled={paginaCorrigida <= 1 || isLoading}
-                            className={`px-4 py-2 text-sm font-medium transition duration-150 border rounded-lg shadow-md ${
+                            className={`px-4 py-2 rounded-lg border text-sm font-medium transition duration-150 shadow-md ${
                                 (paginaCorrigida <= 1 || isLoading)
-                                    ? 'cursor-not-allowed bg-gray-200 text-gray-500'
-                                    : 'border-indigo-500 bg-white text-indigo-600 hover:bg-indigo-50'
+                                    ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                                    : 'bg-white border-indigo-500 text-indigo-600 hover:bg-indigo-50'
                             }`}
                         >
                             Anterior
                         </button>
 
-                        <span className="font-semibold text-gray-700">
+                        <span className="text-gray-700 font-semibold">
                             Página {paginaCorrigida} de {totalPaginas}
                         </span>
 
                         <button
                             onClick={handlePaginaProxima}
                             disabled={paginaCorrigida >= totalPaginas || isLoading}
-                            className={`px-4 py-2 text-sm font-medium transition duration-150 border rounded-lg shadow-md ${
+                            className={`px-4 py-2 rounded-lg border text-sm font-medium transition duration-150 shadow-md ${
                                 (paginaCorrigida >= totalPaginas || isLoading)
-                                    ? 'cursor-not-allowed bg-gray-200 text-gray-500'
-                                    : 'border-indigo-500 bg-white text-indigo-600 hover:bg-indigo-50'
+                                    ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                                    : 'bg-white border-indigo-500 text-indigo-600 hover:bg-indigo-50'
                             }`}
                         >
                             Próxima
