@@ -165,6 +165,7 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
 
     // --- Obtém info do usuário atual (tenta Firebase Auth e, se não encontrado, tenta sinalizadores em usuarios) ---
     const getCurrentUserInfo = () => {
+        // 1) Tenta pegar pelo Firebase Auth (displayName, email, uid)
         try {
             const auth = getAuth();
             const user = auth && auth.currentUser;
@@ -179,16 +180,19 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
             // ignore
         }
 
-        // 2) Tenta encontrar em `usuarios` um usuário marcado como current/isCurrent
+        // 2) Procura em `usuarios` por um usuário marcado como current (sem referenciar variáveis não inicializadas)
         if (Array.isArray(usuarios)) {
-            const found = usuarios.find(u => u.isCurrent || u.current || u.isMe || u.me || u.isLogged || u.email === (found?.email));
-            if (found) {
+            const foundCurrent = usuarios.find(u => u.isCurrent || u.current || u.isMe || u.me || u.isLogged);
+            if (foundCurrent) {
                 return {
-                    name: found.nome || found.name || '',
-                    email: found.email || found.mail || '',
-                    uid: found.uid || found.id || ''
+                    name: foundCurrent.nome || foundCurrent.name || '',
+                    email: foundCurrent.email || foundCurrent.mail || '',
+                    uid: foundCurrent.uid || foundCurrent.id || ''
                 };
             }
+
+            // 3) Se não existir um isCurrent, tentar inferir por um único usuário presente com sinalizadores conhecidos (opcional)
+            // (não forçar; apenas retornar vazio se não for possível identificar)
         }
 
         return { name: '', email: '', uid: '' }; // fallback vazio (usuário não identificado)
@@ -1085,7 +1089,7 @@ const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onU
                         <button
                             onClick={handlePaginaProxima}
                             disabled={paginaCorrigida >= totalPaginas || isLoading}
-                            className={`px-4 py-2 rounded-lg border text-sm font-medium transition duration-150 shadow-md ${
+                            className={`px-4 py-2 rounded-lg border texto-sm font-medium transition duration-150 shadow-md ${
                                 (paginaCorrigida >= totalPaginas || isLoading)
                                     ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
                                     : 'bg-white border-indigo-500 text-indigo-600 hover:bg-indigo-50'
