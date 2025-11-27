@@ -7,7 +7,7 @@ import { db } from './firebase';
 // 1. COMPONENTE PRINCIPAL: LeadsFechados
 // ===============================================
 
-const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateInsurer, onConfirmInsurer, onUpdateDetalhes, fetchLeadsFechadosFromSheet: _fetch_unused, isAdmin, scrollContainerRef }) => {
+const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateInsurer, onConfirmInsurer, onUpdateDetalhes, fetchLeadsFechadosFromFirebase: _fetch_unused, isAdmin, scrollContainerRef }) => {
     // --- ESTADOS ---
     const [fechadosFiltradosInterno, setFechadosFiltradosInterno] = useState([]);
     const [paginaAtual, setPaginaAtual] = useState(1);
