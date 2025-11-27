@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { RefreshCcw, Search, CheckCircle, DollarSign, Calendar } from 'lucide-react';
-import { collection, onSnapshot, query, orderBy, getDocs, where } from 'firebase/firestore';
+import { RefreshCcw, Search, CheckCircle, DollarSign, Calendar, Edit, X } from 'lucide-react';
+import { collection, onSnapshot, query, orderBy, getDocs } from 'firebase/firestore';
 import { db } from './firebase';
 
 // ===============================================
 // 1. COMPONENTE PRINCIPAL: LeadsFechados
 // ===============================================
 
-const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateInsurer, onConfirmInsurer, onUpdateDetalhes, fetchLeadsFechadosFromFirebase: _fetch_unused, isAdmin, scrollContainerRef }) => {
+const LeadsFechados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDetalhes, fetchLeadsFechadosFromSheet, isAdmin, scrollContainerRef }) => {
     // --- ESTADOS ---
     const [fechadosFiltradosInterno, setFechadosFiltradosInterno] = useState([]);
     const [paginaAtual, setPaginaAtual] = useState(1);
@@ -18,14 +18,12 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
     const [isLoading, setIsLoading] = useState(false);
     const [nomeInput, setNomeInput] = useState('');
 
-    // Novo estado: leads vindos do Firestore (normalizados)
-    const [leadsFromFirebase, setLeadsFromFirebase] = useState([]);
-
-    // Estado para lista de usuários lida do Firestore (coleção 'usuarios')
-    const [usuariosFromFirebase, setUsuariosFromFirebase] = useState([]);
-
     // >>> NOVO ESTADO: Controle de edição de nome <<<
+    // O estado nomeEditando foi removido para que a edição fique sempre aberta.
     const [nomeTemporario, setNomeTemporario] = useState({}); // Mapeia ID para o texto temporário no input
+
+    // Novo estado: leads vindos do Firestore
+    const [leadsFromFirebase, setLeadsFromFirebase] = useState([]);
 
     const getMesAnoAtual = () => {
         const hoje = new Date();
@@ -38,9 +36,11 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
     const [filtroData, setFiltroData] = useState(getMesAnoAtual());
     const [premioLiquidoInputDisplay, setPremioLiquidoInputDisplay] = useState({});
 
-    // --- HELPERS / NORMALIZAÇÃO ---
+    // --- FUNÇÕES DE LÓGICA ---
 
-    // Converte DD/MM/AAAA -> AAAA-MM-DD (string) e valida
+    /**
+     * GARANTIA DE FORMATO: Converte DD/MM/AAAA para AAAA-MM-DD sem depender de new Date().
+     */
     const getDataParaComparacao = (dataStr) => {
         if (!dataStr) return '';
         dataStr = String(dataStr).trim();
@@ -61,37 +61,6 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
         }
 
         return ''; // Retorna vazio se não conseguir formatar
-    };
-
-    const getMonthYearFromDateInput = (dateLike) => {
-        // Recebe Date, string ISO, string AAAA-MM-DD, Firestore Timestamp-like (com toDate)
-        if (!dateLike) return '';
-        try {
-            // Firestore Timestamp-like
-            if (typeof dateLike === 'object' && typeof dateLike.toDate === 'function') {
-                const d = dateLike.toDate();
-                const ano = d.getFullYear();
-                const mes = String(d.getMonth() + 1).padStart(2, '0');
-                return `${ano}-${mes}`;
-            }
-            // ISO string ou Date
-            const d = new Date(dateLike);
-            if (!isNaN(d.getTime())) {
-                const ano = d.getFullYear();
-                const mes = String(d.getMonth() + 1).padStart(2, '0');
-                return `${ano}-${mes}`;
-            }
-            // AAAA-MM-DD
-            if (/^\d{4}-\d{2}-\d{2}$/.test(String(dateLike))) {
-                return String(dateLike).substring(0, 7);
-            }
-            // DD/MM/YYYY fallback
-            const iso = getDataParaComparacao(String(dateLike));
-            if (iso) return iso.substring(0, 7);
-        } catch (e) {
-            // swallow
-        }
-        return '';
     };
 
     const normalizarTexto = (texto = '') => {
@@ -115,186 +84,6 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
         return nomeNormalizado.includes(filtroNormalizado);
     };
 
-    // Util: converte várias formatos de moeda para float (ex.: "R$ 1.234,56" -> 1234.56)
-    const parseCurrencyToFloat = (raw) => {
-        if (raw === undefined || raw === null) return NaN;
-        let s = String(raw).trim();
-        if (s === '') return NaN;
-
-        // Remove "R$", espaços e outros caracteres alfabéticos
-        s = s.replace(/R\$\s*/i, '');
-        // Remove any non-digit, non-dot, non-comma, non-minus
-        s = s.replace(/[^\d\.,-]/g, '');
-
-        // If contains both '.' and ',' assume '.' are thousands and ',' decimal (BRL)
-        if (s.indexOf('.') !== -1 && s.indexOf(',') !== -1) {
-            s = s.replace(/\./g, '').replace(',', '.');
-        } else {
-            // If only contains ',' treat as decimal separator
-            if (s.indexOf(',') !== -1 && s.indexOf('.') === -1) {
-                s = s.replace(',', '.');
-            }
-            // If only contains '.' could be decimal or already float; keep as is
-        }
-
-        const n = parseFloat(s);
-        return isNaN(n) ? NaN : n;
-    };
-
-    // Util: converte várias representações de data para YYYY-MM-DD (input date value)
-    const parseDateToInputValue = (raw) => {
-        if (!raw && raw !== 0) return '';
-        try {
-            // Firestore Timestamp-like
-            if (typeof raw === 'object' && typeof raw.toDate === 'function') {
-                const d = raw.toDate();
-                const y = d.getFullYear();
-                const m = String(d.getMonth() + 1).padStart(2, '0');
-                const day = String(d.getDate()).padStart(2, '0');
-                return `${y}-${m}-${day}`;
-            }
-
-            // If it's a Date object
-            if (raw instanceof Date) {
-                const y = raw.getFullYear();
-                const m = String(raw.getMonth() + 1).padStart(2, '0');
-                const day = String(raw.getDate()).padStart(2, '0');
-                return `${y}-${m}-${day}`;
-            }
-
-            // String cases:
-            const s = String(raw).trim();
-
-            // If ISO or includes 'T' (e.g., 2024-11-27T10:00:00Z)
-            if (/^\d{4}-\d{2}-\d{2}T/.test(s) || /^\d{4}-\d{2}-\d{2}$/.test(s)) {
-                const d = new Date(s);
-                if (!isNaN(d.getTime())) {
-                    const y = d.getFullYear();
-                    const m = String(d.getMonth() + 1).padStart(2, '0');
-                    const day = String(d.getDate()).padStart(2, '0');
-                    return `${y}-${m}-${day}`;
-                }
-            }
-
-            // If DD/MM/YYYY
-            if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
-                const [dd, mm, yyyy] = s.split('/');
-                return `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
-            }
-
-            // If already in YYYY-MM-DD but maybe with time zone
-            const mIso = s.match(/^(\d{4}-\d{2}-\d{2})/);
-            if (mIso) return mIso[1];
-
-            return '';
-        } catch (e) {
-            return '';
-        }
-    };
-
-    // Normaliza um documento de leadsFechados similar ao Leads.jsx
-    const normalizeClosedLead = (docId, data = {}) => {
-        const safe = (v) => (v === undefined || v === null ? '' : v);
-
-        // Nome
-        const nomeVal =
-            safe(data.Nome) ||
-            safe(data.nome) ||
-            safe(data.Name) ||
-            safe(data.name) ||
-            '';
-
-        // Modelo do veículo - várias variações
-        const modeloVal =
-            safe(data.Modelo) ||
-            safe(data.modelo) ||
-            safe(data['Modelo do Veículo']) ||
-            safe(data['modelo do veículo']) ||
-            safe(data.modeloVeiculo) ||
-            safe(data.ModeloVeiculo) ||
-            safe(data.vehicleModel) ||
-            safe(data.vehicle_model) ||
-            safe(data.model) ||
-            '';
-
-        // Ano / Modelo
-        const anoModeloVal =
-            safe(data.AnoModelo) ||
-            safe(data.anoModelo) ||
-            safe(data.Ano) ||
-            safe(data.ano) ||
-            safe(data.vehicleYearModel) ||
-            '';
-
-        // Cidade
-        const cidadeVal =
-            safe(data.Cidade) || safe(data.cidade) || safe(data.city) || '';
-
-        // Telefone
-        const telefoneVal =
-            safe(data.Telefone) || safe(data.telefone) || safe(data.phone) || '';
-
-        // Tipo Seguro
-        const tipoSeguroVal =
-            safe(data.TipoSeguro) ||
-            safe(data.tipoSeguro) ||
-            safe(data.insuranceType) ||
-            '';
-
-        // closedAt -> assegura que carregamos objeto Timestamp ou Date / ISO
-        let closedAtRaw = data.closedAt ?? data.ClosedAt ?? data.Closedate ?? null;
-        // createdAt fallback
-        let createdAtRaw = data.createdAt ?? data.created ?? data.Data ?? null;
-
-        // Campos financeiros e vigências (preservamos nas raw e tentamos normalizar)
-        const rawPremio = data.PremioLiquido ?? data.premioLiquido ?? data.Premio ?? '';
-        const rawVigI = data.VigenciaInicial ?? data.vigenciaInicial ?? data.VigenciaInicio ?? '';
-        const rawVigF = data.VigenciaFinal ?? data.vigenciaFinal ?? data.VigenciaFim ?? '';
-        const rawComissao = data.Comissao ?? data.comissao ?? data.comission ?? '';
-        const rawParcelamento = data.Parcelamento ?? data.parcelamento ?? data.Parcelas ?? '';
-        const rawMeioPagamento = data.MeioPagamento ?? data.meioPagamento ?? data.Meiopagamento ?? '';
-        const rawCartaoPortoNovo = data.CartaoPortoNovo ?? data.cartaoPortoNovo ?? data.Cartao ?? '';
-        const rawSeguradora = data.Seguradora ?? data.insurer ?? data.seguradora ?? '';
-
-        return {
-            id: String(docId),
-            ID: data.ID ?? data.id ?? docId,
-            Nome: nomeVal,
-            name: nomeVal,
-            Name: nomeVal,
-            Modelo: modeloVal,
-            vehicleModel: modeloVal,
-            AnoModelo: anoModeloVal,
-            vehicleYearModel: anoModeloVal,
-            Cidade: cidadeVal,
-            city: cidadeVal,
-            Telefone: telefoneVal,
-            phone: telefoneVal,
-            TipoSeguro: tipoSeguroVal,
-            insuranceType: tipoSeguroVal,
-            Status: typeof data.Status === 'string' ? data.Status : (typeof data.status === 'string' ? data.status : ''),
-            Observacao: data.Observacao ?? data.observacao ?? '',
-            Responsavel: data.Responsavel ?? data.responsavel ?? '',
-            usuarioId: data.usuarioId ?? data.userId ?? null,
-            // Campos financeiros e vigência brutos
-            raw: {
-                ...data,
-                PremioLiquido: rawPremio,
-                VigenciaInicial: rawVigI,
-                VigenciaFinal: rawVigF,
-                Comissao: rawComissao,
-                Parcelamento: rawParcelamento,
-                MeioPagamento: rawMeioPagamento,
-                CartaoPortoNovo: rawCartaoPortoNovo,
-                Seguradora: rawSeguradora,
-            },
-            // preserve timestamps/raw
-            closedAt: closedAtRaw,
-            createdAt: createdAtRaw,
-        };
-    };
-
-    // --- UTIL: SCROLL TO TOP ---
     const scrollToTop = () => {
         if (scrollContainerRef && scrollContainerRef.current) {
             scrollContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
@@ -305,7 +94,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
         const filtroLimpo = nomeInput.trim();
         setFiltroNome(filtroLimpo);
         setFiltroData('');
-        setNomeInput('');
+        setDataInput('');
         setPaginaAtual(1);
         scrollToTop();
     };
@@ -318,586 +107,191 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
         scrollToTop();
     };
 
-    // --- Listener em tempo real para leadsFechados no Firestore ---
-    // Observação: agora criamos listeners diferenciados para admin / usuário não-admin
+    // --- FIRESTORE: listener e fetch para leadsFechados ---
     useEffect(() => {
         setIsLoading(true);
-
-        // Helper para obter user do localStorage (raw)
-        const getCurrentUserFromStorage = () => {
-            try {
-                const raw = localStorage.getItem('user');
-                if (!raw) return null;
-                return JSON.parse(raw);
-            } catch (e) {
-                return null;
-            }
-        };
-
-        // Retorna o usuário "resolvido" preferencialmente a partir da lista usuariosFromFirebase (se disponível),
-        // senão a partir de localStorage.
-        const getResolvedLoggedUserLocal = () => {
-            const stored = getCurrentUserFromStorage();
-            if (!stored) return null;
-
-            const storedId = String(stored.id ?? stored.ID ?? stored.userId ?? stored.uid ?? '').trim();
-            const storedLogin = String(stored.usuario ?? stored.user ?? stored.login ?? stored.email ?? '').trim();
-            const storedNome = String(stored.nome ?? stored.name ?? '').trim();
-
-            // Preferir buscar na lista carregada do Firestore
-            if (Array.isArray(usuariosFromFirebase) && usuariosFromFirebase.length > 0) {
-                // 1) por id exato
-                if (storedId) {
-                    const found = usuariosFromFirebase.find(u => {
-                        const uid = String(u.id ?? u.ID ?? u.userId ?? u.uid ?? '').trim();
-                        return uid && uid === storedId;
-                    });
-                    if (found) return found;
-                }
-
-                // 2) por login/email/usuario
-                if (storedLogin) {
-                    const foundLogin = usuariosFromFirebase.find(u => {
-                        const uLogin = String(u.usuario ?? u.user ?? u.email ?? '').trim();
-                        return uLogin && uLogin === storedLogin;
-                    });
-                    if (foundLogin) return foundLogin;
-                }
-
-                // 3) por nome (não normalizado)
-                if (storedNome) {
-                    const foundNome = usuariosFromFirebase.find(u => {
-                        const uNome = String(u.nome ?? '').trim();
-                        return uNome && uNome === storedNome;
-                    });
-                    if (foundNome) return foundNome;
-                }
-            }
-
-            // fallback: retorna o objeto do localStorage (possivelmente com id/nome/login)
-            return stored;
-        };
-
-        // Criar listeners dependendo se é admin ou não
-        const unsubscribers = [];
-        let mounted = true;
-
-        (async () => {
-            try {
-                if (isAdmin) {
-                    // admin vê tudo
-                    const qAll = query(collection(db, 'leadsFechados'), orderBy('closedAt', 'desc'));
-                    const unsub = onSnapshot(qAll, (snapshot) => {
-                        if (!mounted) return;
-                        const lista = snapshot.docs.map(d => normalizeClosedLead(d.id, d.data()));
-                        setLeadsFromFirebase(lista);
-                        setIsLoading(false);
-                    }, (err) => {
-                        console.error('Erro no listener leadsFechados (admin):', err);
-                        setIsLoading(false);
-                    });
-                    unsubscribers.push(unsub);
-                } else {
-                    // Resolve usuário (a partir de usuariosFromFirebase preferencialmente)
-                    const resolved = getResolvedLoggedUserLocal();
-                    const userId = String(resolved?.id ?? resolved?.ID ?? resolved?.userId ?? resolved?.uid ?? '').trim();
-                    const userName = String(resolved?.nome ?? resolved?.name ?? resolved?.Nome ?? '').trim();
-
-                    // If we don't have either id or name, fallback to localStorage raw fields
-                    const storedRaw = getCurrentUserFromStorage();
-                    const fallbackId = String(storedRaw?.id ?? storedRaw?.ID ?? storedRaw?.userId ?? storedRaw?.uid ?? '').trim();
-                    const fallbackName = String(storedRaw?.nome ?? storedRaw?.name ?? '').trim();
-
-                    const finalUserId = userId || fallbackId || '';
-                    const finalUserName = (userName || fallbackName || '').trim();
-
-                    // shared map to dedupe across multiple query snapshots
-                    const sharedDocs = new Map();
-
-                    // helper to apply snapshot to sharedMap and set state
-                    const applySnapshotToShared = (snapshot) => {
-                        snapshot.docs.forEach(doc => {
-                            sharedDocs.set(String(doc.id), normalizeClosedLead(doc.id, doc.data()));
-                        });
-                        // transform to array and sort by closedAt desc (same logic de ordenação simples)
-                        const arr = Array.from(sharedDocs.values()).sort((a, b) => {
-                            const toTime = (lead) => {
-                                if (lead.closedAt && typeof lead.closedAt.toDate === 'function') {
-                                    return lead.closedAt.toDate().getTime();
-                                }
-                                if (lead.closedAt) {
-                                    const d = new Date(lead.closedAt);
-                                    if (!isNaN(d.getTime())) return d.getTime();
-                                }
-                                if (lead.raw?.Data) {
-                                    const iso = getDataParaComparacao(lead.raw?.Data);
-                                    if (iso) {
-                                        const d = new Date(iso + 'T00:00:00');
-                                        if (!isNaN(d.getTime())) return d.getTime();
-                                    }
-                                }
-                                if (lead.createdAt && typeof lead.createdAt.toDate === 'function') {
-                                    return lead.createdAt.toDate().getTime();
-                                }
-                                if (lead.createdAt) {
-                                    const d = new Date(lead.createdAt);
-                                    if (!isNaN(d.getTime())) return d.getTime();
-                                }
-                                return 0;
-                            };
-                            return toTime(b) - toTime(a);
-                        });
-                        if (mounted) {
-                            setLeadsFromFirebase(arr);
-                            setIsLoading(false);
-                        }
-                    };
-
-                    // Query 1: por usuarioId (se tivermos)
-                    if (finalUserId) {
-                        try {
-                            const qByUserId = query(collection(db, 'leadsFechados'), where('usuarioId', '==', finalUserId), orderBy('closedAt', 'desc'));
-                            const unsub1 = onSnapshot(qByUserId, (snapshot) => {
-                                applySnapshotToShared(snapshot);
-                            }, (err) => {
-                                console.error('Erro listener leadsFechados por usuarioId:', err);
-                            });
-                            unsubscribers.push(unsub1);
-                        } catch (err) {
-                            // Em alguns indexes/constraints orderBy+where pode exigir index — como fallback fazemos getDocs simples sem orderBy
-                            try {
-                                const qByUserIdFallback = query(collection(db, 'leadsFechados'), where('usuarioId', '==', finalUserId));
-                                const unsub1b = onSnapshot(qByUserIdFallback, (snapshot) => {
-                                    applySnapshotToShared(snapshot);
-                                }, (err) => {
-                                    console.error('Erro listener fallback leadsFechados por usuarioId:', err);
-                                });
-                                unsubscribers.push(unsub1b);
-                            } catch (e) {
-                                console.error('Erro criando query por usuarioId (fallback):', e);
-                            }
-                        }
-                    }
-
-                    // Query 2: por Responsavel (campo 'Responsavel') se tivermos nome
-                    if (finalUserName) {
-                        try {
-                            const qByResp = query(collection(db, 'leadsFechados'), where('Responsavel', '==', finalUserName), orderBy('closedAt', 'desc'));
-                            const unsub2 = onSnapshot(qByResp, (snapshot) => {
-                                applySnapshotToShared(snapshot);
-                            }, (err) => {
-                                console.error('Erro listener leadsFechados por Responsavel:', err);
-                            });
-                            unsubscribers.push(unsub2);
-                        } catch (err) {
-                            // fallback sem orderBy
-                            try {
-                                const qByRespFb = query(collection(db, 'leadsFechados'), where('Responsavel', '==', finalUserName));
-                                const unsub2b = onSnapshot(qByRespFb, (snapshot) => {
-                                    applySnapshotToShared(snapshot);
-                                }, (err) => {
-                                    console.error('Erro listener fallback leadsFechados por Responsavel:', err);
-                                });
-                                unsubscribers.push(unsub2b);
-                            } catch (e) {
-                                console.error('Erro criando query por Responsavel (fallback):', e);
-                            }
-                        }
-
-                        // Também tentamos variação de campo em minúsculas 'responsavel'
-                        try {
-                            const qByRespLower = query(collection(db, 'leadsFechados'), where('responsavel', '==', finalUserName), orderBy('closedAt', 'desc'));
-                            const unsub3 = onSnapshot(qByRespLower, (snapshot) => {
-                                applySnapshotToShared(snapshot);
-                            }, (err) => {
-                                console.error('Erro listener leadsFechados por responsavel:', err);
-                            });
-                            unsubscribers.push(unsub3);
-                        } catch (err) {
-                            // fallback sem orderBy
-                            try {
-                                const qByRespLowerFb = query(collection(db, 'leadsFechados'), where('responsavel', '==', finalUserName));
-                                const unsub3b = onSnapshot(qByRespLowerFb, (snapshot) => {
-                                    applySnapshotToShared(snapshot);
-                                }, (err) => {
-                                    console.error('Erro listener fallback leadsFechados por responsavel:', err);
-                                });
-                                unsubscribers.push(unsub3b);
-                            } catch (e) {
-                                console.error('Erro criando query por responsavel (fallback):', e);
-                            }
-                        }
-                    }
-
-                    // Caso não tivéssemos nem id nem nome resolvido (usuário não identificado), deixamos lista vazia e isLoading false
-                    if (!finalUserId && !finalUserName) {
-                        setLeadsFromFirebase([]);
-                        setIsLoading(false);
-                    }
-                }
-            } catch (err) {
-                console.error('Erro ao iniciar listeners leadsFechados:', err);
+        // Listener em tempo real
+        try {
+            const q = query(collection(db, 'leadsFechados'), orderBy('closedAt', 'desc'));
+            const unsub = onSnapshot(q, (snapshot) => {
+                const list = snapshot.docs.map(d => ({ ID: d.id, ...d.data() }));
+                setLeadsFromFirebase(list);
                 setIsLoading(false);
-            }
-        })();
-
-        return () => {
-            // cleanup
-            unsubscribers.forEach(un => {
-                try { un(); } catch (e) { /* ignore */ }
+            }, (err) => {
+                console.error('Erro no listener leadsFechados:', err);
+                setIsLoading(false);
             });
-            mounted = false;
-        };
-    }, [isAdmin, usuariosFromFirebase]); // re-cria listeners se variáveis mudarem
 
-    // Fetch usuarios collection once (to resolve usuarioId / nome / ID matches)
-    useEffect(() => {
-        let mounted = true;
-        const fetchUsuarios = async () => {
-            try {
-                const snap = await getDocs(query(collection(db, 'usuarios')));
-                if (!mounted) return;
-                const arr = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-                setUsuariosFromFirebase(arr);
-            } catch (err) {
-                console.error('Erro ao buscar usuarios do Firestore:', err);
-            }
-        };
-        fetchUsuarios();
-        return () => { mounted = false; };
+            return () => {
+                try { unsub(); } catch (e) { /* ignore */ }
+            };
+        } catch (err) {
+            console.error('Erro iniciando listener leadsFechados:', err);
+            setIsLoading(false);
+        }
     }, []);
 
     // Handler de refresh manual (busca via getDocs)
     const handleRefresh = async () => {
         setIsLoading(true);
         try {
-            const snapshot = await getDocs(query(collection(db, 'leadsFechados'), orderBy('closedAt', 'desc')));
-            const lista = snapshot.docs.map(d => normalizeClosedLead(d.id, d.data()));
+            const snap = await getDocs(query(collection(db, 'leadsFechados'), orderBy('closedAt', 'desc')));
+            const lista = snap.docs.map(d => ({ ID: d.id, ...d.data() }));
             setLeadsFromFirebase(lista);
         } catch (error) {
-            console.error('Erro ao atualizar leads fechados:', error);
+            console.error('Erro ao atualizar leads fechados (fetch):', error);
         } finally {
             setIsLoading(false);
         }
     };
 
-    // --------------------------
-    // VISIBILITY: apenas admin vê todos; usuário vê apenas os fechados atribuidos a ele
-    // Regras solicitadas:
-    // - Mostrar lead se lead.usuarioId === usuário.id (ou equivalentes)
-    // - Mostrar lead se lead.ID || lead.id corresponde ao usuário
-    // - Mostrar lead se lead.Responsavel corresponde ao nome do usuário
-    // Busca/validação combinando localStorage + usuários carregados da coleção 'usuarios'
-    // --------------------------
-    const getCurrentUserFromStorage = () => {
-        try {
-            const raw = localStorage.getItem('user');
-            if (!raw) return null;
-            return JSON.parse(raw);
-        } catch (e) {
-            return null;
-        }
-    };
-
-    // Retorna o usuário "resolvido" preferencialmente a partir da lista usuariosFromFirebase (se disponível),
-    // senão a partir de localStorage.
-    const getResolvedLoggedUser = () => {
-        const stored = getCurrentUserFromStorage();
-        if (!stored) return null;
-
-        const storedId = String(stored.id ?? stored.ID ?? stored.userId ?? stored.uid ?? '').trim();
-        const storedLogin = String(stored.usuario ?? stored.user ?? stored.login ?? stored.email ?? '').trim();
-        const storedNome = normalizarTexto(String(stored.nome ?? stored.name ?? '').trim());
-
-        // Preferir buscar na lista carregada do Firestore
-        if (Array.isArray(usuariosFromFirebase) && usuariosFromFirebase.length > 0) {
-            // 1) por id exato
-            if (storedId) {
-                const found = usuariosFromFirebase.find(u => {
-                    const uid = String(u.id ?? u.ID ?? u.userId ?? u.uid ?? '').trim();
-                    return uid && uid === storedId;
-                });
-                if (found) return found;
-            }
-
-            // 2) por login/email/usuario
-            if (storedLogin) {
-                const foundLogin = usuariosFromFirebase.find(u => {
-                    const uLogin = String(u.usuario ?? u.user ?? u.email ?? '').trim();
-                    return uLogin && uLogin === storedLogin;
-                });
-                if (foundLogin) return foundLogin;
-            }
-
-            // 3) por nome normalizado
-            if (storedNome) {
-                const foundNome = usuariosFromFirebase.find(u => {
-                    const uNome = normalizarTexto(String(u.nome ?? '').trim());
-                    return uNome && uNome === storedNome;
-                });
-                if (foundNome) return foundNome;
-            }
-        }
-
-        // fallback: retorna o objeto do localStorage (possivelmente com id/nome/login)
-        return stored;
-    };
-
-    const canViewLead = (lead) => {
-        if (isAdmin) return true;
-        const logged = getResolvedLoggedUser();
-        if (!logged) return false;
-
-        // normalize logged identifiers
-        const loggedIds = new Set();
-        const addIf = (v) => {
-            if (v === undefined || v === null) return;
-            const s = String(v).trim();
-            if (s) loggedIds.add(s);
-        };
-        addIf(logged.id ?? logged.ID ?? logged.userId ?? logged.uid);
-        addIf(logged.ID ?? logged.id ?? logged.userId ?? logged.uid); // duplicates ok
-        addIf(logged.idFirebase ?? logged.uid);
-
-        const loggedLogin = String(logged.usuario ?? logged.user ?? logged.email ?? '').trim();
-        const loggedNomeNormalized = normalizarTexto(String(logged.nome ?? logged.name ?? logged.usuario ?? '').trim());
-
-        // Lead fields to check
-        const leadUsuarioId = lead.usuarioId !== undefined && lead.usuarioId !== null ? String(lead.usuarioId).trim() : '';
-        const leadIDfield = lead.ID !== undefined && lead.ID !== null ? String(lead.ID).trim() : '';
-        const leadIdField = lead.id !== undefined && lead.id !== null ? String(lead.id).trim() : '';
-        const leadResponsavelRaw = lead.Responsavel ?? lead.responsavel ?? lead.raw?.Responsavel ?? lead.raw?.responsavel ?? '';
-        const leadResponsavelNormalized = normalizarTexto(String(leadResponsavelRaw).trim());
-        const leadUsuarioLogin = String(lead.usuario ?? lead.user ?? lead.raw?.usuario ?? lead.raw?.user ?? '').trim();
-
-        // Check usuarioId match
-        if (leadUsuarioId && loggedIds.has(leadUsuarioId)) return true;
-
-        // Check ID or id matches any logged id
-        if ((leadIDfield && loggedIds.has(leadIDfield)) || (leadIdField && loggedIds.has(leadIdField))) return true;
-
-        // Check Responsavel name match
-        if (leadResponsavelNormalized && loggedNomeNormalized && leadResponsavelNormalized === loggedNomeNormalized) return true;
-
-        // Check login/usuario match
-        if (leadUsuarioLogin && loggedLogin && leadUsuarioLogin === loggedLogin) return true;
-
-        // Additional check: if usuariosProp was passed and contains the logged user, match by that record's id/nome
-        try {
-            if (Array.isArray(usuariosProp) && usuariosProp.length > 0) {
-                const found = usuariosProp.find(u => {
-                    const uid = String(u.id ?? u.ID ?? u.userId ?? '').trim();
-                    const ulogin = String(u.usuario ?? u.user ?? u.email ?? '').trim();
-                    const unome = normalizarTexto(String(u.nome ?? '').trim());
-                    if (uid && loggedIds.has(uid)) return true;
-                    if (ulogin && loggedLogin && ulogin === loggedLogin) return true;
-                    if (unome && loggedNomeNormalized && unome === loggedNomeNormalized) return true;
-                    return false;
-                });
-                if (found) return true;
-            }
-        } catch (e) {
-            // ignore
-        }
-
-        return false;
-    };
-    // --------------------------
+    // --- EFEITO DE CARREGAMENTO INICIAL ---
+    useEffect(() => {
+        handleRefresh();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // --- EFEITO DE FILTRAGEM E SINCRONIZAÇÃO DE ESTADOS ---
     useEffect(() => {
-        // Uses leadsFromFirebase (normalized)
-        const fechadosAtuaisAll = (leadsFromFirebase || []).filter(lead => {
-            // If Status is defined, require 'Fechado' (string match)
-            if (lead.Status) return String(lead.Status).toLowerCase() === 'fechado';
-            // If there's closedAt, assume closed
-            if (lead.closedAt) return true;
-            // fallback: include if Data or createdAt exists
-            if (lead.raw?.Data || lead.createdAt) return true;
-            return false;
-        });
+        // Preferir leads vindos do Firebase; se vazio, usar prop `leads` como fallback
+        const sourceLeads = (Array.isArray(leadsFromFirebase) && leadsFromFirebase.length > 0) ? leadsFromFirebase : (Array.isArray(leads) ? leads : []);
+        const fechadosAtuais = sourceLeads.filter(lead => String(lead.Status || lead.status || '').toLowerCase() === 'fechado' || !!lead.closedAt);
 
-        // Apply visibility filter (only assigned user or admin)
-        const fechadosAtuais = fechadosAtuaisAll.filter(canViewLead);
-
-        // Sync valores (PremioLiquido in cents, Comissao string/number, Parcelamento, insurer, MeioPagamento, CartaoPortoNovo)
+        // Sincronização de estados
         setValores(prevValores => {
             const novosValores = { ...prevValores };
-
             fechadosAtuais.forEach(lead => {
-                const raw = lead.raw || {};
-                const leadKey = String(lead.ID ?? lead.id ?? '');
+                const key = String(lead.ID ?? lead.id ?? lead.idLead ?? lead.documentId ?? lead.phone ?? '');
+                const rawPremioFromApi = String(lead.PremioLiquido ?? lead.premioLiquido ?? lead.Premio ?? lead.PREMIO ?? '');
+                const premioFromApi = parseFloat(rawPremioFromApi.replace(/\./g, '').replace(',', '.'));
+                const premioInCents = isNaN(premioFromApi) || rawPremioFromApi === '' ? null : Math.round(premioFromApi * 100);
 
-                // parse premio
-                const rawPremio = raw.PremioLiquido ?? raw.premioLiquido ?? raw.Premio ?? '';
-                const parsedPremioFloat = parseCurrencyToFloat(rawPremio); // e.g. 1234.56
-                const premioInCents = isNaN(parsedPremioFloat) ? null : Math.round(parsedPremioFloat * 100);
+                const apiComissao = lead.Comissao ?? lead.comissao ?? '';
+                const apiParcelamento = lead.Parcelamento ?? lead.parcelamento ?? '';
+                const apiInsurer = lead.Seguradora ?? lead.insurer ?? '';
+                // >>> NOVO: Meio de Pagamento <<<
+                const apiMeioPagamento = lead.MeioPagamento ?? lead.meioPagamento ?? '';
+                // >>> NOVO: Cartao Porto Seguro Novo? <<<
+                const apiCartaoPortoNovo = lead.CartaoPortoNovo ?? lead.cartaoPortoNovo ?? '';
 
-                // parse comissao raw - aceita "10%", "10,5", "10"
-                let apiComissao = raw.Comissao ?? raw.comissao ?? '';
-                if (apiComissao !== '' && typeof apiComissao !== 'string') {
-                    apiComissao = String(apiComissao);
+                if (!novosValores[key]) novosValores[key] = {};
+
+                if ((novosValores[key].PremioLiquido === undefined || novosValores[key].PremioLiquido === null) && premioInCents !== null) {
+                    novosValores[key].PremioLiquido = premioInCents;
+                } else if (novosValores[key].PremioLiquido === undefined) {
+                    novosValores[key].PremioLiquido = null;
                 }
 
-                // parse parcelamento
-                const apiParcelamento = raw.Parcelamento ?? raw.parcelamento ?? raw.Parcelas ?? '';
-
-                const apiInsurer = raw.Seguradora ?? raw.insurer ?? raw.seguradora ?? '';
-                const apiMeioPagamento = raw.MeioPagamento ?? raw.meioPagamento ?? raw.Meiopagamento ?? '';
-                const apiCartaoPortoNovo = raw.CartaoPortoNovo ?? raw.cartaoPortoNovo ?? raw.Cartao ?? '';
-
-                // If there is no entry or fields are undefined, set them
-                if (!novosValores[leadKey]) novosValores[leadKey] = {};
-
-                // Only set if value is meaningful or not yet present (to avoid overwriting edited local valores)
-                if ((novosValores[leadKey].PremioLiquido === undefined || novosValores[leadKey].PremioLiquido === null) && premioInCents !== null) {
-                    novosValores[leadKey].PremioLiquido = premioInCents;
-                } else if (novosValores[leadKey].PremioLiquido === undefined) {
-                    novosValores[leadKey].PremioLiquido = null;
+                if ((novosValores[key].Comissao === undefined || novosValores[key].Comissao === '') && apiComissao !== '') {
+                    novosValores[key].Comissao = typeof apiComissao === 'string' ? apiComissao : String(apiComissao);
+                } else if (novosValores[key].Comissao === undefined) {
+                    novosValores[key].Comissao = '';
                 }
 
-                if ((novosValores[leadKey].Comissao === undefined || novosValores[leadKey].Comissao === '') && apiComissao !== '') {
-                    // normalize "10%" => "10%" or "10,5" => "10,5"
-                    novosValores[leadKey].Comissao = typeof apiComissao === 'string' ? apiComissao : String(apiComissao);
-                } else if (novosValores[leadKey].Comissao === undefined) {
-                    novosValores[leadKey].Comissao = '';
+                if ((novosValores[key].Parcelamento === undefined || novosValores[key].Parcelamento === '') && apiParcelamento !== '') {
+                    novosValores[key].Parcelamento = String(apiParcelamento);
+                } else if (novosValores[key].Parcelamento === undefined) {
+                    novosValores[key].Parcelamento = '';
                 }
 
-                if ((novosValores[leadKey].Parcelamento === undefined || novosValores[leadKey].Parcelamento === '') && apiParcelamento !== '') {
-                    novosValores[leadKey].Parcelamento = String(apiParcelamento);
-                } else if (novosValores[leadKey].Parcelamento === undefined) {
-                    novosValores[leadKey].Parcelamento = '';
+                if ((novosValores[key].insurer === undefined || novosValores[key].insurer === '') && apiInsurer !== '') {
+                    novosValores[key].insurer = String(apiInsurer);
+                } else if (novosValores[key].insurer === undefined) {
+                    novosValores[key].insurer = '';
                 }
 
-                if ((novosValores[leadKey].insurer === undefined || novosValores[leadKey].insurer === '') && apiInsurer !== '') {
-                    novosValores[leadKey].insurer = String(apiInsurer);
-                } else if (novosValores[leadKey].insurer === undefined) {
-                    novosValores[leadKey].insurer = '';
+                if ((novosValores[key].MeioPagamento === undefined || novosValores[key].MeioPagamento === '') && apiMeioPagamento !== '') {
+                    novosValores[key].MeioPagamento = String(apiMeioPagamento);
+                } else if (novosValores[key].MeioPagamento === undefined) {
+                    novosValores[key].MeioPagamento = '';
                 }
 
-                if ((novosValores[leadKey].MeioPagamento === undefined || novosValores[leadKey].MeioPagamento === '') && apiMeioPagamento !== '') {
-                    novosValores[leadKey].MeioPagamento = String(apiMeioPagamento);
-                } else if (novosValores[leadKey].MeioPagamento === undefined) {
-                    novosValores[leadKey].MeioPagamento = '';
-                }
-
-                if ((novosValores[leadKey].CartaoPortoNovo === undefined || novosValores[leadKey].CartaoPortoNovo === '') && apiCartaoPortoNovo !== '') {
-                    novosValores[leadKey].CartaoPortoNovo = String(apiCartaoPortoNovo);
-                } else if (novosValores[leadKey].CartaoPortoNovo === undefined) {
-                    novosValores[leadKey].CartaoPortoNovo = '';
+                if ((novosValores[key].CartaoPortoNovo === undefined || novosValores[key].CartaoPortoNovo === '') && apiCartaoPortoNovo !== '') {
+                    novosValores[key].CartaoPortoNovo = String(apiCartaoPortoNovo);
+                } else if (novosValores[key].CartaoPortoNovo === undefined) {
+                    novosValores[key].CartaoPortoNovo = '';
                 }
             });
-
             return novosValores;
         });
 
-        // Sync Nome temporario
+        // >>> NOVO: Sincronização do estado de Nome Temporário <<<
         setNomeTemporario(prevNomes => {
             const novosNomes = { ...prevNomes };
             fechadosAtuais.forEach(lead => {
-                const leadKey = String(lead.ID ?? lead.id ?? '');
-                if (novosNomes[leadKey] === undefined || novosNomes[leadKey] === '') {
-                    novosNomes[leadKey] = lead.name || lead.Name || lead.Nome || '';
+                const key = String(lead.ID ?? lead.id ?? lead.documentId ?? lead.phone ?? '');
+                if (novosNomes[key] === undefined) {
+                    novosNomes[key] = lead.name || lead.Nome || lead.nome || '';
                 }
             });
             return novosNomes;
         });
+        // <<< FIM NOVO ESTADO NOME TEMPORÁRIO >>>
 
-        // Sync display for premioLiquido
         setPremioLiquidoInputDisplay(prevDisplay => {
             const newDisplay = { ...prevDisplay };
             fechadosAtuais.forEach(lead => {
-                const leadKey = String(lead.ID ?? lead.id ?? '');
-                const rawPremio = lead.raw?.PremioLiquido ?? lead.raw?.premioLiquido ?? lead.raw?.Premio ?? '';
-                const parsed = parseCurrencyToFloat(rawPremio);
-                if (!isNaN(parsed)) {
-                    // formatted like "1.234,56"
-                    newDisplay[leadKey] = parsed.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                } else {
-                    // If we already had a display value (local), keep it; otherwise empty
-                    if (prevDisplay[leadKey] === undefined) newDisplay[leadKey] = '';
+                const key = String(lead.ID ?? lead.id ?? lead.documentId ?? lead.phone ?? '');
+                const currentPremio = String(lead.PremioLiquido ?? lead.premioLiquido ?? lead.Premio ?? '');
+                if (currentPremio !== '') {
+                    const premioFloat = parseFloat(currentPremio.replace(',', '.').replace(/\./g, '').replace(/\s/g, ''));
+                    newDisplay[key] = isNaN(premioFloat) ? '' : premioFloat.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                } else if (prevDisplay[key] === undefined) {
+                    newDisplay[key] = '';
                 }
             });
             return newDisplay;
         });
 
-        // Sync vigencia (inicio/final) using parseDateToInputValue
         setVigencia(prevVigencia => {
             const novasVigencias = { ...prevVigencia };
             fechadosAtuais.forEach(lead => {
-                const leadKey = String(lead.ID ?? lead.id ?? '');
+                const key = String(lead.ID ?? lead.id ?? lead.documentId ?? lead.phone ?? '');
+                const vigenciaInicioStrApi = String(lead.VigenciaInicial ?? lead.vigenciaInicial ?? lead.VigenciaInicio ?? '');
+                const vigenciaFinalStrApi = String(lead.VigenciaFinal ?? lead.vigenciaFinal ?? lead.VigenciaFim ?? '');
 
-                const vigenciaInicioRaw = lead.raw?.VigenciaInicial ?? lead.raw?.vigenciaInicial ?? lead.raw?.VigenciaInicio ?? '';
-                const vigenciaFinalRaw = lead.raw?.VigenciaFinal ?? lead.raw?.vigenciaFinal ?? lead.raw?.VigenciaFim ?? '';
+                if (!novasVigencias[key]) novasVigencias[key] = { inicio: '', final: '' };
 
-                const parsedInicio = parseDateToInputValue(vigenciaInicioRaw);
-                const parsedFinal = parseDateToInputValue(vigenciaFinalRaw);
-
-                if (!novasVigencias[leadKey]) novasVigencias[leadKey] = { inicio: '', final: '' };
-
-                // If parsed value exists and not already set locally (or empty), set it
-                if (parsedInicio && (!novasVigencias[leadKey].inicio || novasVigencias[leadKey].inicio === '')) {
-                    novasVigencias[leadKey].inicio = parsedInicio;
-                } else if (!novasVigencias[leadKey].inicio && parsedInicio === '') {
-                    // fallback: try to infer from Data or closedAt
-                    if (!novasVigencias[leadKey].inicio) {
-                        // do nothing
-                    }
+                if (vigenciaInicioStrApi && (!novasVigencias[key].inicio || novasVigencias[key].inicio === '')) {
+                    novasVigencias[key].inicio = vigenciaInicioStrApi;
                 }
 
-                if (parsedFinal && (!novasVigencias[leadKey].final || novasVigencias[leadKey].final === '')) {
-                    novasVigencias[leadKey].final = parsedFinal;
-                } else if (!novasVigencias[leadKey].final && parsedFinal === '') {
-                    // if only inicio exists, compute final = +1 year
-                    if (novasVigencias[leadKey].inicio && !novasVigencias[leadKey].final) {
-                        try {
-                            const d = new Date(novasVigencias[leadKey].inicio + 'T00:00:00');
-                            d.setFullYear(d.getFullYear() + 1);
-                            const y = d.getFullYear();
-                            const m = String(d.getMonth() + 1).padStart(2, '0');
-                            const day = String(d.getDate()).padStart(2, '0');
-                            novasVigencias[leadKey].final = `${y}-${m}-${day}`;
-                        } catch (e) {
-                            // ignore
-                        }
+                if (vigenciaFinalStrApi && (!novasVigencias[key].final || novasVigencias[key].final === '')) {
+                    novasVigencias[key].final = vigenciaFinalStrApi;
+                } else if (!novasVigencias[key].final && novasVigencias[key].inicio) {
+                    // tenta inferir final = +1 ano
+                    try {
+                        const d = new Date(novasVigencias[key].inicio + 'T00:00:00');
+                        d.setFullYear(d.getFullYear() + 1);
+                        const y = d.getFullYear();
+                        const m = String(d.getMonth() + 1).padStart(2, '0');
+                        const day = String(d.getDate()).padStart(2, '0');
+                        novasVigencias[key].final = `${y}-${m}-${day}`;
+                    } catch (e) {
+                        // ignore
                     }
                 }
             });
             return novasVigencias;
         });
 
-        // ORDENAÇÃO: usa closedAt quando disponível, senão Data/createdAt
+        // ORDENAÇÃO
         const fechadosOrdenados = [...fechadosAtuais].sort((a, b) => {
-            // obter timestamp para comparação
+            // prefer closedAt, depois Data
             const toTime = (lead) => {
-                // closedAt Firestore Timestamp-like
-                if (lead.closedAt && typeof lead.closedAt.toDate === 'function') {
-                    return lead.closedAt.toDate().getTime();
-                }
-                // closedAt como ISO / date string
+                if (lead.closedAt && typeof lead.closedAt.toDate === 'function') return lead.closedAt.toDate().getTime();
                 if (lead.closedAt) {
                     const d = new Date(lead.closedAt);
                     if (!isNaN(d.getTime())) return d.getTime();
                 }
-                // fallback Data (DD/MM/YYYY)
-                if (lead.raw?.Data) {
-                    const iso = getDataParaComparacao(lead.raw?.Data);
-                    if (iso) {
-                        const d = new Date(iso + 'T00:00:00');
-                        if (!isNaN(d.getTime())) return d.getTime();
-                    }
-                }
-                // fallback createdAt
-                if (lead.createdAt && typeof lead.createdAt.toDate === 'function') {
-                    return lead.createdAt.toDate().getTime();
-                }
-                if (lead.createdAt) {
-                    const d = new Date(lead.createdAt);
+                const dataStr = lead.Data ?? lead.data ?? lead.createdAt ?? '';
+                const iso = getDataParaComparacao(String(dataStr));
+                if (iso) {
+                    const d = new Date(iso + 'T00:00:00');
                     if (!isNaN(d.getTime())) return d.getTime();
                 }
                 return 0;
             };
-
             return toTime(b) - toTime(a);
         });
 
@@ -905,35 +299,20 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
         let leadsFiltrados;
         if (filtroNome) {
             leadsFiltrados = fechadosOrdenados.filter(lead =>
-                nomeContemFiltro(lead.name || lead.Name || lead.Nome, filtroNome)
+                nomeContemFiltro(lead.name || lead.Nome || lead.nome || '', filtroNome)
             );
         } else if (filtroData) {
-            // filtroData no formato AAAA-MM
             leadsFiltrados = fechadosOrdenados.filter(lead => {
-                // Prioriza closedAt
-                const monthYearFromClosedAt = getMonthYearFromDateInput(lead.closedAt);
-                if (monthYearFromClosedAt) {
-                    return monthYearFromClosedAt === filtroData;
-                }
-                // fallback para Data (DD/MM/YYYY ou AAAA-MM-DD)
-                const dataLeadRaw = lead.raw?.Data ?? lead.raw?.data ?? lead.createdAt ?? '';
-                const dataLeadFormatada = dataLeadRaw ? (getMonthYearFromDateInput(dataLeadRaw) || (getDataParaComparacao(String(dataLeadRaw)) || '').substring(0, 7)) : '';
-                if (dataLeadFormatada) return dataLeadFormatada === filtroData;
-
-                // fallback try vigencia final/inicio
-                const vigIni = vigencia[lead.ID]?.inicio || '';
-                if (vigIni && vigIni.substring(0, 7) === filtroData) return true;
-                const vigFim = vigencia[lead.ID]?.final || '';
-                if (vigFim && vigFim.substring(0, 7) === filtroData) return true;
-
-                return false;
+                const dataLeadFormatada = getDataParaComparacao(lead.Data ?? lead.data ?? '');
+                const dataLeadMesAno = dataLeadFormatada ? dataLeadFormatada.substring(0, 7) : '';
+                return dataLeadMesAno === filtroData;
             });
         } else {
             leadsFiltrados = fechadosOrdenados;
         }
 
         setFechadosFiltradosInterno(leadsFiltrados);
-    }, [leadsFromFirebase, filtroNome, filtroData, isAdmin, usuariosFromFirebase, usuariosProp]); // incluí usuariosFromFirebase e usuariosProp para recalcular caso lista mude
+    }, [leadsFromFirebase, leads, filtroNome, filtroData]); // inclui leads prop como fallback
 
     // --- FUNÇÕES DE HANDLER (NOVAS E EXISTENTES) ---
 
@@ -945,18 +324,24 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
     // >>> NOVO HANDLER: Lógica para editar o nome do lead <<<
     const handleNomeBlur = (id, novoNome) => {
         const nomeAtualizado = novoNome.trim();
-        const lead = (leadsFromFirebase || []).find(l => String(l.ID) === String(id) || String(l.id) === String(id));
-        if (lead && (lead.name || lead.Name || lead.Nome) !== nomeAtualizado) {
+        // setNomeEditando(null); // REMOVIDO: O campo não precisa sair do modo de edição
+
+        // Verifica se o nome realmente mudou para evitar chamadas desnecessárias à API
+        const lead = (leadsFromFirebase.length ? leadsFromFirebase : leads).find(l => String(l.ID) === String(id) || String(l.id) === String(id));
+        if (lead && (lead.name !== nomeAtualizado && lead.Nome !== nomeAtualizado && lead.nome !== nomeAtualizado)) {
             if (nomeAtualizado) {
+                // 1. Atualiza o estado local temporário (que é exibido no card)
                 setNomeTemporario(prev => ({
                     ...prev,
                     [`${id}`]: nomeAtualizado,
                 }));
+                // 2. Chama a função de atualização da prop, enviando 'name' para a API/external handler
                 onUpdateDetalhes(id, 'name', nomeAtualizado);
             } else {
+                // Se o campo ficou vazio, reverte para o nome original (ou deixa a lógica de validação na API)
                 setNomeTemporario(prev => ({
                     ...prev,
-                    [`${id}`]: lead.name || '',
+                    [`${id}`]: lead.name || lead.Nome || lead.nome || '',
                 }));
             }
         }
@@ -966,7 +351,6 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
     const handlePremioLiquidoChange = (id, valor) => {
         let cleanedValue = valor.replace(/[^\d,\.]/g, '');
         const commaParts = cleanedValue.split(',');
-
         if (commaParts.length > 2) {
             cleanedValue = commaParts[0] + ',' + commaParts.slice(1).join('');
         }
@@ -979,7 +363,6 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
             [`${id}`]: cleanedValue,
         }));
 
-        // Parsing to cents: remove dots, replace comma with dot, parse float
         const valorParaParse = cleanedValue.replace(/\./g, '').replace(',', '.');
         const valorEmReais = parseFloat(valorParaParse);
         const valorParaEstado = isNaN(valorEmReais) || cleanedValue === '' ? null : Math.round(valorEmReais * 100);
@@ -1028,6 +411,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
         }));
     };
 
+    // Converte para float (com ponto decimal) antes de enviar a atualização
     const handleComissaoBlur = (id) => {
         const comissaoInput = valores[`${id}`]?.Comissao || '';
         const comissaoFloat = parseFloat(comissaoInput.replace(',', '.'));
@@ -1059,9 +443,11 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
                 },
             };
             
+            // Lógica de limpeza: Se o novo Meio de Pagamento não for 'CP',
+            // limpe o campo 'CartaoPortoNovo' se ele estiver preenchido.
             if (valor !== 'CP' && newState[`${id}`]?.CartaoPortoNovo) {
                 newState[`${id}`].CartaoPortoNovo = '';
-                onUpdateDetalhes(id, 'CartaoPortoNovo', '');
+                onUpdateDetalhes(id, 'CartaoPortoNovo', ''); // Limpa na API também
             }
             
             return newState;
@@ -1070,6 +456,9 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
         onUpdateDetalhes(id, 'MeioPagamento', valor);
     };
 
+    // ************************************************************
+    // NOVO HANDLER: Cartão Porto Seguro Novo?
+    // ************************************************************
     const handleCartaoPortoChange = (id, valor) => {
         setValores(prev => ({
             ...prev,
@@ -1081,6 +470,9 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
         onUpdateDetalhes(id, 'CartaoPortoNovo', valor);
     };
 
+    // ************************************************************
+    // Handler para Seguradora (Atualizado para se integrar aos novos campos)
+    // ************************************************************
     const handleInsurerChange = (id, valor) => {
         const portoSeguradoras = ['Porto Seguro', 'Azul Seguros', 'Itau Seguros'];
         
@@ -1093,6 +485,8 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
                 },
             };
             
+            // Lógica de limpeza: Se a nova seguradora não for Porto/Azul/Itaú,
+            // limpe o campo 'CartaoPortoNovo' se ele estiver preenchido.
             if (!portoSeguradoras.includes(valor) && newState[`${id}`]?.CartaoPortoNovo) {
                 newState[`${id}`].CartaoPortoNovo = '';
                 onUpdateDetalhes(id, 'CartaoPortoNovo', ''); // Limpa na API também
@@ -1125,6 +519,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
             },
         }));
 
+        // Atualiza a planilha/API com as datas (estas podem ser atualizadas imediatamente, se desejar)
         onUpdateDetalhes(id, 'VigenciaInicial', dataString);
         onUpdateDetalhes(id, 'VigenciaFinal', dataFinal);
     };
@@ -1185,7 +580,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
                 {/* Controles de Filtro (Inline) */}
                 <div className="flex flex-col md:flex-row gap-4 justify-between items-stretch">
                     {/* Filtro de Nome */}
-                    <div className="flex itens-center gap-2 flex-1 min-w-[200px]">
+                    <div className="flex items-center gap-2 flex-1 min-w-[200px]">
                         <input
                             type="text"
                             placeholder="Buscar por nome..."
@@ -1228,62 +623,59 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
                     </div>
                 ) : (
                     leadsPagina.map((lead) => {
-                        // leadKey: identificador para usar nos estados locais (valores/vigencia/nomeTemporario)
-                        const leadKey = String(lead.ID ?? lead.id ?? '');
-                        // docId: id do documento Firestore (usado para chamadas ao backend/parent)
-                        const docId = lead.id ?? (lead.ID ? String(lead.ID) : '');
+                        const responsavel = usuarios.find((u) => u.nome === (lead.Responsavel ?? lead.responsavel));
+                        const isSeguradoraPreenchida = !!(lead.Seguradora ?? lead.insurer ?? lead.raw?.Seguradora);
 
-                        const responsavel = (usuariosFromFirebase.length ? usuariosFromFirebase : (usuariosProp || [])).find((u) => {
-                            const nomeNorm = normalizarTexto(String(u.nome ?? '').trim());
-                            const leadRespNorm = normalizarTexto(String(lead.Responsavel ?? lead.responsavel ?? '').trim());
-                            return nomeNorm && leadRespNorm && nomeNorm === leadRespNorm;
-                        });
-
-                        const isSeguradoraPreenchida = !!(lead.raw?.Seguradora || lead.raw?.insurer || lead.raw?.Seguradora);
+                        // Determine key used in estados
+                        const leadKey = String(lead.ID ?? lead.id ?? lead.documentId ?? lead.phone ?? '');
 
                         // Variáveis de estado para a lógica condicional
-                        const currentInsurer = valores[`${leadKey}`]?.insurer || (lead.raw?.Seguradora ?? lead.raw?.insurer ?? '');
-                        const currentMeioPagamento = valores[`${leadKey}`]?.MeioPagamento || (lead.raw?.MeioPagamento ?? lead.raw?.meioPagamento ?? '');
+                        const currentInsurer = valores[`${leadKey}`]?.insurer || (lead.Seguradora ?? lead.insurer ?? '');
+                        const currentMeioPagamento = valores[`${leadKey}`]?.MeioPagamento || (lead.MeioPagamento ?? lead.meioPagamento ?? '');
                         const isPortoInsurer = ['Porto Seguro', 'Azul Seguros', 'Itau Seguros'].includes(currentInsurer);
                         const isCPPayment = currentMeioPagamento === 'CP';
 
+                        // Lógica de exibição do Cartão Porto Novo:
                         const showCartaoPortoNovo = isPortoInsurer && isCPPayment;
 
+                        // Lógica de desativação do botão de confirmação
                         const isButtonDisabled =
-                            (
-                                !(valores[`${leadKey}`]?.insurer || (lead.raw?.Seguradora ?? lead.raw?.insurer)) ||
-                                (valores[`${leadKey}`]?.PremioLiquido === null || valores[`${leadKey}`]?.PremioLiquido === undefined) ||
-                                !valores[`${leadKey}`]?.Comissao ||
-                                parseFloat(String(valores[`${leadKey}`]?.Comissao || (lead.raw?.Comissao ?? '0')).replace(',', '.')) === 0 ||
-                                !valores[`${leadKey}`]?.Parcelamento ||
-                                valores[`${leadKey}`]?.Parcelamento === '' ||
-                                !vigencia[`${leadKey}`]?.inicio ||
-                                !vigencia[`${leadKey}`]?.final
-                            );
+                            ! (valores[`${leadKey}`]?.insurer || (lead.Seguradora ?? lead.insurer ?? '')) ||
+                            valores[`${leadKey}`]?.PremioLiquido === null ||
+                            valores[`${leadKey}`]?.PremioLiquido === undefined ||
+                            !valores[`${leadKey}`]?.Comissao ||
+                            parseFloat(String(valores[`${leadKey}`]?.Comissao || '0').replace(',', '.')) === 0 ||
+                            !valores[`${leadKey}`]?.Parcelamento ||
+                            valores[`${leadKey}`]?.Parcelamento === '' ||
+                            !vigencia[`${leadKey}`]?.inicio ||
+                            !vigencia[`${leadKey}`]?.final;
 
                         // Show formatted values (fall back to local state or raw)
                         const displayPremio = premioLiquidoInputDisplay[`${leadKey}`] ?? (
                             (valores[`${leadKey}`]?.PremioLiquido !== undefined && valores[`${leadKey}`]?.PremioLiquido !== null)
                                 ? formatarMoeda(valores[`${leadKey}`].PremioLiquido)
-                                : (parseCurrencyToFloat(lead.raw?.PremioLiquido ?? lead.raw?.premioLiquido ?? '') ? (parseCurrencyToFloat(lead.raw?.PremioLiquido ?? lead.raw?.premioLiquido ?? '')).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '')
+                                : ((lead.PremioLiquido ?? lead.premioLiquido ?? '') ? (String(lead.PremioLiquido ?? lead.premioLiquido ?? '').replace(/\./g,'').replace(',', '.')) : '')
                         );
 
                         return (
                             <div
-                                key={leadKey || docId}
+                                key={leadKey}
                                 className={`bg-white rounded-xl shadow-lg hover:shadow-xl transition duration-300 p-5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 relative border-t-4 ${isSeguradoraPreenchida ? 'border-green-600' : 'border-amber-500'}`}
                             >
                                 {/* COLUNA 1: Informações do Lead */}
                                 <div className="col-span-1 border-b pb-4 lg:border-r lg:pb-0 lg:pr-6">
                                     
+                                    {/* >>> NOVO: Lógica de Edição de Nome do Lead (SEMPRE ABERTO OU BLOQUEADO) <<< */}
                                     <div className="flex items-center gap-2 mb-2">
                                         {isSeguradoraPreenchida ? (
-                                            <h3 className="text-xl font-bold text-gray-900">{nomeTemporario[leadKey] || lead.name || lead.Name || lead.Nome}</h3>
+                                            // BLOQUEADO: Se a seguradora estiver preenchida
+                                            <h3 className="text-xl font-bold text-gray-900">{nomeTemporario[leadKey] || lead.name || lead.Nome || lead.nome}</h3>
                                         ) : (
+                                            // SEMPRE ABERTO: Se a seguradora NÃO estiver preenchida
                                             <div className="flex flex-col w-full">
                                                 <input
                                                     type="text"
-                                                    value={nomeTemporario[leadKey] || lead.name || lead.Name || lead.Nome || ''}
+                                                    value={nomeTemporario[leadKey] ?? (lead.name || lead.Nome || lead.nome || '')}
                                                     onChange={(e) => setNomeTemporario(prev => ({ ...prev, [leadKey]: e.target.value }))}
                                                     onBlur={(e) => handleNomeBlur(leadKey, e.target.value)}
                                                     onKeyDown={(e) => {
@@ -1297,13 +689,15 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
                                             </div>
                                         )}
                                     </div>
+                                    {/* <<< FIM NOVO: Lógica de Edição de Nome do Lead >>> */}
+
 
                                     <div className="space-y-1 text-sm text-gray-700">
-                                        <p><strong>Modelo:</strong> {lead.vehicleModel || lead.Modelo || ''}</p>
-                                        <p><strong>Ano/Modelo:</strong> {lead.vehicleYearModel || lead.AnoModelo || lead.anoModelo || ''}</p>
-                                        <p><strong>Cidade:</strong> {lead.city || lead.Cidade || ''}</p>
-                                        <p><strong>Telefone:</strong> {lead.phone || lead.Telefone || ''}</p>
-                                        <p><strong>Tipo de Seguro:</strong> {lead.insuranceType || lead.TipoSeguro || ''}</p>
+                                        <p><strong>Modelo:</strong> {lead.vehicleModel ?? lead.Modelo}</p>
+                                        <p><strong>Ano/Modelo:</strong> {lead.vehicleYearModel ?? lead.AnoModelo ?? lead.anoModelo}</p>
+                                        <p><strong>Cidade:</strong> {lead.city ?? lead.Cidade}</p>
+                                        <p><strong>Telefone:</strong> {lead.phone ?? lead.Telefone}</p>
+                                        <p><strong>Tipo de Seguro:</strong> {lead.insuranceType ?? lead.TipoSeguro}</p>
                                     </div>
 
                                     {responsavel && isAdmin && (
@@ -1324,9 +718,9 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
                                     <div className="mb-4">
                                         <label className="text-xs font-semibold text-gray-600 block mb-1">Seguradora</label>
                                         <select
-                                            value={valores[`${leadKey}`]?.insurer || lead.raw?.Seguradora || lead.raw?.insurer || ''}
+                                            value={valores[`${leadKey}`]?.insurer || (lead.Seguradora ?? lead.insurer ?? '')}
                                             onChange={(e) => handleInsurerChange(leadKey, e.target.value)}
-                                            disabled={!!(lead.raw?.Seguradora || lead.raw?.insurer)}
+                                            disabled={isSeguradoraPreenchida}
                                             className="w-full p-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500"
                                         >
                                             <option value="">Selecione a seguradora</option>
@@ -1351,9 +745,9 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
                                     <div className="mb-4">
                                         <label className="text-xs font-semibold text-gray-600 block mb-1">Meio de Pagamento</label>
                                         <select
-                                            value={valores[`${leadKey}`]?.MeioPagamento || lead.raw?.MeioPagamento || ''}
+                                            value={valores[`${leadKey}`]?.MeioPagamento || (lead.MeioPagamento ?? lead.meioPagamento ?? '')}
                                             onChange={(e) => handleMeioPagamentoChange(leadKey, e.target.value)}
-                                            disabled={!!(lead.raw?.Seguradora || lead.raw?.insurer)}
+                                            disabled={isSeguradoraPreenchida}
                                             className="w-full p-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500"
                                         >
                                             <option value=""> </option>
@@ -1369,9 +763,9 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
                                         <div className="mb-4">
                                             <label className="text-xs font-semibold text-gray-600 block mb-1">Cartão Porto Seguro Novo?</label>
                                             <select
-                                                value={valores[`${leadKey}`]?.CartaoPortoNovo || lead.raw?.CartaoPortoNovo || ''}
+                                                value={valores[`${leadKey}`]?.CartaoPortoNovo || (lead.CartaoPortoNovo ?? lead.cartaoPortoNovo ?? '')}
                                                 onChange={(e) => handleCartaoPortoChange(leadKey, e.target.value)}
-                                                disabled={!!(lead.raw?.Seguradora || lead.raw?.insurer)}
+                                                disabled={isSeguradoraPreenchida}
                                                 className="w-full p-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500"
                                             >
                                                 <option value=""> </option>
@@ -1382,7 +776,8 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
                                     )}
                                     
                                     {/* 4., 5., 6. Demais campos (Prêmio, Comissão, Parcelamento) */}
-                                    <div className="grid grid-cols-2 gap-3 mt-4">
+                                    <div className="grid grid-cols-2 gap-3 mt-4"> {/* Adicionado mt-4 para espaçamento após os novos campos */}
+                                        {/* Prêmio Líquido (Input) */}
                                         <div>
                                             <label className="text-xs font-semibold text-gray-600 block mb-1">Prêmio Líquido</label>
                                             <div className="relative">
@@ -1390,15 +785,16 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
                                                 <input
                                                     type="text"
                                                     placeholder="0,00"
-                                                    value={displayPremio || ''}
+                                                    value={premioLiquidoInputDisplay[`${leadKey}`] || ''}
                                                     onChange={(e) => handlePremioLiquidoChange(leadKey, e.target.value)}
                                                     onBlur={() => handlePremioLiquidoBlur(leadKey)}
-                                                    disabled={!!(lead.raw?.Seguradora || lead.raw?.insurer)}
+                                                    disabled={isSeguradoraPreenchida}
                                                     className="w-full p-2 pl-8 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500 text-right"
                                                 />
                                             </div>
                                         </div>
 
+                                        {/* Comissão (Input) */}
                                         <div>
                                             <label className="text-xs font-semibold text-gray-600 block mb-1">Comissão (%)</label>
                                             <div className="relative">
@@ -1406,21 +802,22 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
                                                 <input
                                                     type="text"
                                                     placeholder="0,00"
-                                                    value={valores[`${leadKey}`]?.Comissao || (lead.raw?.Comissao ?? '')}
+                                                    value={valores[`${leadKey}`]?.Comissao || ''}
                                                     onChange={(e) => handleComissaoChange(leadKey, e.target.value)}
                                                     onBlur={() => handleComissaoBlur(leadKey)}
-                                                    disabled={!!(lead.raw?.Seguradora || lead.raw?.insurer)}
+                                                    disabled={isSeguradoraPreenchida}
                                                     className="w-full p-2 pl-8 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500 text-right"
                                                 />
                                             </div>
                                         </div>
 
+                                        {/* Parcelamento (Select) */}
                                         <div className="col-span-2">
                                             <label className="text-xs font-semibold text-gray-600 block mb-1">Parcelamento</label>
                                             <select
-                                                value={valores[`${leadKey}`]?.Parcelamento || (lead.raw?.Parcelamento ?? '')}
+                                                value={valores[`${leadKey}`]?.Parcelamento || ''}
                                                 onChange={(e) => handleParcelamentoChange(leadKey, e.target.value)}
-                                                disabled={!!(lead.raw?.Seguradora || lead.raw?.insurer)}
+                                                disabled={isSeguradoraPreenchida}
                                                 className="w-full p-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500"
                                             >
                                                 <option value="">Selecione o Parcelamento</option>
@@ -1446,9 +843,9 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
                                         <input
                                             id={`vigencia-inicio-${leadKey}`}
                                             type="date"
-                                            value={vigencia[`${leadKey}`]?.inicio || parseDateToInputValue(lead.raw?.VigenciaInicial ?? lead.raw?.vigenciaInicial ?? '') || ''}
+                                            value={vigencia[`${leadKey}`]?.inicio || ''}
                                             onChange={(e) => handleVigenciaInicioChange(leadKey, e.target.value)}
-                                            disabled={!!(lead.raw?.Seguradora || lead.raw?.insurer)}
+                                            disabled={isSeguradoraPreenchida}
                                             className="w-full p-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:cursor-not-allowed transition duration-150 focus:ring-green-500 focus:border-green-500"
                                         />
                                     </div>
@@ -1459,7 +856,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
                                         <input
                                             id={`vigencia-final-${leadKey}`}
                                             type="date"
-                                            value={vigencia[`${leadKey}`]?.final || parseDateToInputValue(lead.raw?.VigenciaFinal ?? lead.raw?.vigenciaFinal ?? '') || ''}
+                                            value={vigencia[`${leadKey}`]?.final || ''}
                                             readOnly
                                             disabled={true}
                                             className="w-full p-2 border border-gray-200 rounded-lg text-sm bg-gray-100 cursor-not-allowed"
@@ -1470,17 +867,17 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
                                     {!isSeguradoraPreenchida ? (
                                         <button
                                             onClick={async () => {
-                                                // Use docId for parent handlers
                                                 await onConfirmInsurer(
-                                                    docId ?? leadKey,
+                                                    leadKey,
                                                     valores[`${leadKey}`]?.PremioLiquido === null ? null : valores[`${leadKey}`]?.PremioLiquido / 100,
-                                                    valores[`${leadKey}`]?.insurer || lead.raw?.Seguradora || lead.raw?.insurer || '',
-                                                    parseFloat(String(valores[`${leadKey}`]?.Comissao || (lead.raw?.Comissao ?? '0')).replace(',', '.')),
-                                                    valores[`${leadKey}`]?.Parcelamento || lead.raw?.Parcelamento || lead.raw?.parcelamento || '',
-                                                    vigencia[`${leadKey}`]?.inicio || parseDateToInputValue(lead.raw?.VigenciaInicial ?? lead.raw?.vigenciaInicial ?? ''),
-                                                    vigencia[`${leadKey}`]?.final || parseDateToInputValue(lead.raw?.VigenciaFinal ?? lead.raw?.vigenciaFinal ?? ''),
-                                                    valores[`${leadKey}`]?.MeioPagamento || lead.raw?.MeioPagamento || '',
-                                                    valores[`${leadKey}`]?.CartaoPortoNovo || lead.raw?.CartaoPortoNovo || ''
+                                                    valores[`${leadKey}`]?.insurer || (lead.Seguradora ?? lead.insurer ?? ''),
+                                                    parseFloat(String(valores[`${leadKey}`]?.Comissao || '0').replace(',', '.')),
+                                                    valores[`${leadKey}`]?.Parcelamento,
+                                                    vigencia[`${leadKey}`]?.inicio,
+                                                    vigencia[`${leadKey}`]?.final,
+                                                    // Meio de Pagamento e Cartão Porto Novo na Confirmação 
+                                                    valores[`${leadKey}`]?.MeioPagamento || '',
+                                                    valores[`${leadKey}`]?.CartaoPortoNovo || ''
                                                 );
                                             }}
                                             disabled={isButtonDisabled}
@@ -1514,7 +911,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
                         <button
                             onClick={handlePaginaAnterior}
                             disabled={paginaCorrigida <= 1 || isLoading}
-                            className={`px-4 py-2 rounded-lg border text-sm font-medium transition duration-150 shadow-md ${
+                            className={`px-4 py-2 rounded-lg border texto-sm font-medium transition duration-150 shadow-md ${
                                 (paginaCorrigida <= 1 || isLoading)
                                     ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
                                     : 'bg-white border-indigo-500 text-indigo-600 hover:bg-indigo-50'
@@ -1530,7 +927,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios: usuariosProp, onUpdateI
                         <button
                             onClick={handlePaginaProxima}
                             disabled={paginaCorrigida >= totalPaginas || isLoading}
-                            className={`px-4 py-2 rounded-lg border text-sm font-medium transition duration-150 shadow-md ${
+                            className={`px-4 py-2 rounded-lg border texto-sm font-medium transition duration-150 shadow-md ${
                                 (paginaCorrigida >= totalPaginas || isLoading)
                                     ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
                                     : 'bg-white border-indigo-500 text-indigo-600 hover:bg-indigo-50'
