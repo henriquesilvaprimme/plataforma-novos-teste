@@ -112,7 +112,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
         return nomeNormalizado.includes(filtroNormalizado);
     };
 
-    // Util: converte vários formatos de moeda para float (ex.: "R$ 1.234,56" -> 1234.56)
+    // Util: converte várias formatos de moeda para float (ex.: "R$ 1.234,56" -> 1234.56)
     const parseCurrencyToFloat = (raw) => {
         if (raw === undefined || raw === null) return NaN;
         let s = String(raw).trim();
@@ -354,13 +354,26 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
     // VISIBILITY: apenas admin vê todos; usuário vê apenas os fechados atribuidos a ele
     // --------------------------
     const getCurrentUserFromStorage = () => {
-        try {
-            const raw = localStorage.getItem('user');
-            if (!raw) return null;
-            return JSON.parse(raw);
-        } catch (e) {
-            return null;
+        // Tenta diversas chaves no localStorage e sessionStorage para ser mais resiliente
+        const keys = ['user', 'usuario', 'usuarioLogado', 'currentUser', 'loggedUser'];
+        for (const storage of [localStorage, sessionStorage]) {
+            try {
+                for (const k of keys) {
+                    const raw = storage.getItem(k);
+                    if (!raw) continue;
+                    try {
+                        const parsed = JSON.parse(raw);
+                        if (parsed && typeof parsed === 'object') return parsed;
+                    } catch (e) {
+                        // se não é JSON, retorna string enrolada num objeto simples
+                        return { usuario: raw, nome: raw };
+                    }
+                }
+            } catch (e) {
+                // ignore storage access errors
+            }
         }
+        return null;
     };
 
     const canViewLead = (lead) => {
@@ -368,23 +381,49 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
         const user = getCurrentUserFromStorage();
         if (!user) return false;
 
-        const userIdStr = String(user.id ?? user.ID ?? user.userId ?? '').trim();
-        const userName = String(user.nome ?? user.name ?? user.usuario ?? '').trim().toLowerCase();
+        const userIdStr = String(user.id ?? user.ID ?? user.userId ?? user.uid ?? '').trim();
+        const userNameRaw = String(user.nome ?? user.name ?? user.usuario ?? user.login ?? '').trim();
+        const userName = normalizarTexto(userNameRaw);
 
-        // Check lead responsavel name
-        const leadResponsavel = String(lead.Responsavel ?? lead.responsavel ?? '').trim().toLowerCase();
+        // Check lead responsavel name (normalizado) - allow contains (so "João Silva" matches "joao")
+        const leadResponsavelRaw = String(lead.Responsavel ?? lead.responsavel ?? lead.raw?.Responsavel ?? lead.raw?.responsavel ?? '').trim();
+        const leadResponsavel = normalizarTexto(leadResponsavelRaw);
         if (leadResponsavel && userName && leadResponsavel === userName) return true;
+        if (leadResponsavel && userName && leadResponsavel.includes(userName)) return true;
+        if (leadResponsavel && userName && userName.includes(leadResponsavel)) return true;
 
         // Check usuarioId match
-        const leadUsuarioId = String(lead.usuarioId ?? lead.raw?.usuarioId ?? lead.raw?.userId ?? '').trim();
+        const leadUsuarioIdRaw = lead.usuarioId ?? lead.raw?.usuarioId ?? lead.raw?.userId ?? lead.raw?.user ?? '';
+        const leadUsuarioId = String(leadUsuarioIdRaw ?? '').trim();
         if (leadUsuarioId && userIdStr && leadUsuarioId === userIdStr) return true;
 
-        // Check raw.usuario (login) against user.usuario
-        const leadUsuarioLogin = String(lead.raw?.usuario ?? lead.raw?.user ?? '').trim();
-        const userLogin = String(user.usuario ?? '').trim();
+        // Check raw.usuario (login) against user.usuario/login
+        const leadUsuarioLogin = String(lead.raw?.usuario ?? lead.raw?.user ?? lead.raw?.login ?? '').trim();
+        const userLogin = String(user.usuario ?? user.login ?? '').trim();
         if (leadUsuarioLogin && userLogin && leadUsuarioLogin === userLogin) return true;
 
-        // fallback: if no clear match, deny access
+        // Também tente comparar pelo nome contra lista de usuarios passada como prop (se houver)
+        if (usuarios && Array.isArray(usuarios)) {
+            const found = usuarios.find(u => {
+                const uname = normalizarTexto(String(u.nome ?? u.name ?? '').trim());
+                return uname && userName && (uname === userName || uname.includes(userName) || userName.includes(uname));
+            });
+            if (found) {
+                // se o lead tiver responsavel igual ao found.nome, permitir
+                const responsavelLead = normalizarTexto(String(lead.Responsavel ?? lead.responsavel ?? '').trim());
+                const foundName = normalizarTexto(String(found.nome ?? found.name ?? '').trim());
+                if (responsavelLead && foundName && (responsavelLead === foundName || responsavelLead.includes(foundName) || foundName.includes(responsavelLead))) {
+                    return true;
+                }
+                // ou se lead.usuarioId corresponder ao found.id
+                const foundId = String(found.id ?? found.ID ?? found.userId ?? '').trim();
+                if (foundId && String(lead.usuarioId ?? lead.raw?.usuarioId ?? '').trim() === foundId) {
+                    return true;
+                }
+            }
+        }
+
+        // fallback: deny access
         return false;
     };
     // --------------------------
@@ -618,7 +657,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
         }
 
         setFechadosFiltradosInterno(leadsFiltrados);
-    }, [leadsFromFirebase, filtroNome, filtroData, isAdmin]); // dependência isAdmin para recalcular quando mudar permissão
+    }, [leadsFromFirebase, filtroNome, filtroData, isAdmin, usuarios]); // incluí usuarios para recalcular caso lista mude
 
     // --- FUNÇÕES DE HANDLER (NOVAS E EXISTENTES) ---
 
@@ -918,7 +957,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
                         // docId: id do documento Firestore (usado para chamadas ao backend/parent)
                         const docId = lead.id ?? (lead.ID ? String(lead.ID) : '');
 
-                        const responsavel = usuarios.find((u) => u.nome === lead.Responsavel || u.nome === lead.Responsavel);
+                        const responsavel = usuarios.find((u) => u.nome === lead.Responsavel || u.nome === lead.responsavel);
                         const isSeguradoraPreenchida = !!(lead.raw?.Seguradora || lead.raw?.insurer || lead.raw?.Seguradora);
 
                         // Variáveis de estado para a lógica condicional
@@ -934,7 +973,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
                                 !(valores[`${leadKey}`]?.insurer || (lead.raw?.Seguradora ?? lead.raw?.insurer)) ||
                                 (valores[`${leadKey}`]?.PremioLiquido === null || valores[`${leadKey}`]?.PremioLiquido === undefined) ||
                                 !valores[`${leadKey}`]?.Comissao ||
-                                parseFloat(String(valores[`${leadKey}`]?.Comissao || '0').replace(',', '.')) === 0 ||
+                                parseFloat(String(valores[`${leadKey}`]?.Comissao || (lead.raw?.Comissao ?? '0')).replace(',', '.')) === 0 ||
                                 !valores[`${leadKey}`]?.Parcelamento ||
                                 valores[`${leadKey}`]?.Parcelamento === '' ||
                                 !vigencia[`${leadKey}`]?.inicio ||
