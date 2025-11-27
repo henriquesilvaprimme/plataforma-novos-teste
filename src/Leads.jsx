@@ -24,7 +24,7 @@ const Leads = ({
   const [selecionados, setSelecionados] = useState({});
   const [paginaAtual, setPaginaAtual] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
-  const [observacoes, setObservacoes] = {};
+  const [observacoes, setObservacoes] = useState({});
   const [isEditingObservacao, setIsEditingObservacao] = useState({});
   const [dataInput, setDataInput] = useState('');
   const [filtroData, setFiltroData] = useState('');
@@ -829,10 +829,9 @@ const Leads = ({
           Observacao: closingLead.observacao ?? closingLead.Observacao ?? '',
           Responsavel: closingLead.responsavel ?? closingLead.Responsavel ?? usuarioLogado?.nome ?? '',
           Data: closingLead.Data ?? formatDDMMYYYYFromISO(closingLead.createdAt) ?? '',
-          // MODIFICAÇÃO AQUI: createdAt com a data atual + 1 ano
-          createdAt: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString(),
+          createdAt: closingLead.createdAt ?? null,
           closedAt: serverTimestamp(),
-          registeredAt: serverTimestamp(), // Timestamp específico para renovacoes
+          registeredAt: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString(), // Data atual + 1 ano
         };
         await setDoc(renovRef, renovPayload);
       } catch (errRenov) {
