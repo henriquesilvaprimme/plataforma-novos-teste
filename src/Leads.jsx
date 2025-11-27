@@ -121,34 +121,48 @@ const Leads = ({
   // Função para mover lead para leadsFechados e marcar o original como closed
   const moveLeadToClosed = async (leadId, leadData = {}) => {
     try {
-      // Prepare payload com múltiplos formatos (para compatibilidade com o componente de fechados)
+      // Agora o payload contém apenas os campos já preenchidos pelo lead
+      // e deixa em branco os campos que serão preenchidos no LeadsFechados.jsx
       const payload = {
         // IDs / nomes
         ID: leadData.ID ?? leadData.id ?? String(leadId),
         id: String(leadId),
         name: leadData.name ?? leadData.nome ?? leadData.Nome ?? leadData.Name ?? '',
         Name: leadData.Name ?? leadData.name ?? leadData.nome ?? '',
-        // Valores financeiros (preservando nomes esperados pela UI antiga)
-        PremioLiquido: leadData.PremioLiquido ?? leadData.premioLiquido ?? leadData.premioLiquidoFormatted ?? '',
-        Comissao: leadData.Comissao ?? leadData.comissao ?? leadData.Comissao ?? '',
-        Parcelamento: leadData.Parcelamento ?? leadData.parcelamento ?? leadData.parcelamento ?? '',
-        // Seguradora / pagamento / cartão Porto
-        Seguradora: leadData.Seguradora ?? leadData.insurer ?? leadData.insurer ?? '',
-        MeioPagamento: leadData.MeioPagamento ?? leadData.MeioPagamento ?? '',
-        CartaoPortoNovo: leadData.CartaoPortoNovo ?? '',
-        // Datas
-        Data: leadData.Data ?? formatDDMMYYYYFromISO(leadData.createdAt) ?? '',
-        VigenciaInicial: leadData.VigenciaInicial ?? leadData.vigenciaInicial ?? '',
-        VigenciaFinal: leadData.VigenciaFinal ?? leadData.vigenciaFinal ?? '',
-        // Outros
+        // Campos do lead preenchidos: modelo, ano/modelo, cidade, telefone, tipo de seguro
+        Modelo: leadData.vehicleModel ?? leadData.Modelo ?? '',
+        vehicleModel: leadData.vehicleModel ?? leadData.Modelo ?? '',
+        AnoModelo: leadData.vehicleYearModel ?? leadData.AnoModelo ?? leadData.anoModelo ?? '',
+        vehicleYearModel: leadData.vehicleYearModel ?? leadData.AnoModelo ?? leadData.anoModelo ?? '',
+        Cidade: leadData.city ?? leadData.Cidade ?? leadData.cidade ?? '',
+        city: leadData.city ?? leadData.Cidade ?? leadData.cidade ?? '',
+        Telefone: leadData.phone ?? leadData.Telefone ?? leadData.telefone ?? '',
+        phone: leadData.phone ?? leadData.Telefone ?? leadData.telefone ?? '',
+        TipoSeguro: leadData.insuranceType ?? leadData.TipoSeguro ?? leadData.tipoSeguro ?? '',
+        insuranceType: leadData.insuranceType ?? leadData.TipoSeguro ?? leadData.tipoSeguro ?? '',
+        // Campos de venda que devem ficar vazios para serem preenchidos em LeadsFechados.jsx
+        Seguradora: '',
+        insurer: '',
+        MeioPagamento: '',
+        CartaoPortoNovo: '',
+        PremioLiquido: '',
+        Comissao: '',
+        Parcelamento: '',
+        VigenciaInicial: '',
+        VigenciaFinal: '',
+        // Outros campos úteis a manter
         Status: leadData.status ?? leadData.Status ?? 'Fechado',
         Observacao: leadData.observacao ?? leadData.Observacao ?? '',
         Responsavel: leadData.responsavel ?? leadData.Responsavel ?? '',
         usuarioId: leadData.usuarioId ?? leadData.usuarioId ?? null,
+        Data: leadData.Data ?? formatDDMMYYYYFromISO(leadData.createdAt) ?? '',
         createdAt: leadData.createdAt ?? null,
         closedAt: serverTimestamp(),
-        // Mantenha o objeto raw para referência
-        raw: { ...(leadData || {}) },
+        // opcional: manter raw se quiser referência (aqui manter breve)
+        raw: {
+          ID: leadData.ID ?? leadData.id ?? String(leadId),
+          originalStatus: leadData.status ?? leadData.Status ?? '',
+        },
       };
 
       // Salva no leadsFechados com o mesmo ID (facilita rastreabilidade)
