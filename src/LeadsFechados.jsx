@@ -350,10 +350,49 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
         }
     };
 
+    // --------------------------
+    // VISIBILITY: apenas admin vê todos; usuário vê apenas os fechados atribuidos a ele
+    // --------------------------
+    const getCurrentUserFromStorage = () => {
+        try {
+            const raw = localStorage.getItem('user');
+            if (!raw) return null;
+            return JSON.parse(raw);
+        } catch (e) {
+            return null;
+        }
+    };
+
+    const canViewLead = (lead) => {
+        if (isAdmin) return true;
+        const user = getCurrentUserFromStorage();
+        if (!user) return false;
+
+        const userIdStr = String(user.id ?? user.ID ?? user.userId ?? '').trim();
+        const userName = String(user.nome ?? user.name ?? user.usuario ?? '').trim().toLowerCase();
+
+        // Check lead responsavel name
+        const leadResponsavel = String(lead.Responsavel ?? lead.responsavel ?? '').trim().toLowerCase();
+        if (leadResponsavel && userName && leadResponsavel === userName) return true;
+
+        // Check usuarioId match
+        const leadUsuarioId = String(lead.usuarioId ?? lead.raw?.usuarioId ?? lead.raw?.userId ?? '').trim();
+        if (leadUsuarioId && userIdStr && leadUsuarioId === userIdStr) return true;
+
+        // Check raw.usuario (login) against user.usuario
+        const leadUsuarioLogin = String(lead.raw?.usuario ?? lead.raw?.user ?? '').trim();
+        const userLogin = String(user.usuario ?? '').trim();
+        if (leadUsuarioLogin && userLogin && leadUsuarioLogin === userLogin) return true;
+
+        // fallback: if no clear match, deny access
+        return false;
+    };
+    // --------------------------
+
     // --- EFEITO DE FILTRAGEM E SINCRONIZAÇÃO DE ESTADOS ---
     useEffect(() => {
         // Uses leadsFromFirebase (normalized)
-        const fechadosAtuais = (leadsFromFirebase || []).filter(lead => {
+        const fechadosAtuaisAll = (leadsFromFirebase || []).filter(lead => {
             // If Status is defined, require 'Fechado' (string match)
             if (lead.Status) return String(lead.Status).toLowerCase() === 'fechado';
             // If there's closedAt, assume closed
@@ -362,6 +401,9 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
             if (lead.raw?.Data || lead.createdAt) return true;
             return false;
         });
+
+        // Apply visibility filter (only assigned user or admin)
+        const fechadosAtuais = fechadosAtuaisAll.filter(canViewLead);
 
         // Sync valores (PremioLiquido in cents, Comissao string/number, Parcelamento, insurer, MeioPagamento, CartaoPortoNovo)
         setValores(prevValores => {
@@ -576,7 +618,7 @@ const LeadsFechados = ({ leads: _leads_unused, usuarios, onUpdateInsurer, onConf
         }
 
         setFechadosFiltradosInterno(leadsFiltrados);
-    }, [leadsFromFirebase, filtroNome, filtroData]);
+    }, [leadsFromFirebase, filtroNome, filtroData, isAdmin]); // dependência isAdmin para recalcular quando mudar permissão
 
     // --- FUNÇÕES DE HANDLER (NOVAS E EXISTENTES) ---
 
