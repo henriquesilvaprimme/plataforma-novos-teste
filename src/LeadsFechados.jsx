@@ -13,6 +13,15 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase'; // ajuste o caminho se necessário
 
+// Pequeno utilitário para classes condicinais (evita template literals longos)
+const classNames = (...args) => args.filter(Boolean).join(' ');
+
+/**
+ * Componente Leads:
+ * - Lê collection 'leads' (listener em tempo real)
+ * - showFechados=true -> exibe apenas leads com insurerConfirmed === true
+ * - Respeita visibilidade: Admin vê todos; Usuario vê apenas seus leads
+ */
 const Leads = ({
   usuarios,
   onUpdateStatus,
@@ -20,7 +29,7 @@ const Leads = ({
   usuarioLogado,
   scrollContainerRef,
   saveLocalChange,
-  showFechados = false, // NOVA PROP: se true exibe somente leads com insurerConfirmed === true
+  showFechados = false, // se true exibe apenas insurerConfirmed === true
 }) => {
   const [leadsData, setLeadsData] = useState([]);
   const [selecionados, setSelecionados] = useState({});
@@ -36,15 +45,13 @@ const Leads = ({
   const [showNotification, setShowNotification] = useState(false);
   const [hasScheduledToday, setHasScheduledToday] = useState(false);
 
-  // NOVOS STATES: modal de fechamento
+  // modal de fechamento
   const [isClosingModalOpen, setIsClosingModalOpen] = useState(false);
   const [closingLead, setClosingLead] = useState(null);
-
-  // campos do modal
   const [modalNome, setModalNome] = useState('');
   const [modalSeguradora, setModalSeguradora] = useState('');
   const [modalMeioPagamento, setModalMeioPagamento] = useState('');
-  const [modalCartaoPortoNovo, setModalCartaoPortoNovo] = useState('Não'); // 'Sim' | 'Não'
+  const [modalCartaoPortoNovo, setModalCartaoPortoNovo] = useState('Não');
   const [modalPremioLiquido, setModalPremioLiquido] = useState('');
   const [modalComissao, setModalComissao] = useState('');
   const [modalParcelamento, setModalParcelamento] = useState('1');
@@ -52,7 +59,7 @@ const Leads = ({
   const [modalVigenciaFinal, setModalVigenciaFinal] = useState('');
   const [isSubmittingClose, setIsSubmittingClose] = useState(false);
 
-  // Normaliza um documento do Firestore para o formato esperado pelo React
+  // Normalização de documento Firestore -> objeto consumível
   const normalizeLead = (docId, data = {}) => {
     const safe = (v) => (v === undefined || v === null ? '' : v);
 
@@ -69,7 +76,6 @@ const Leads = ({
       }
     };
 
-    // Nome
     const nomeVal =
       safe(data.Nome) ||
       safe(data.nome) ||
@@ -78,52 +84,33 @@ const Leads = ({
       safe(data['Nome Completo']) ||
       '';
 
-    // Modelo do veículo - mapeia várias variações possíveis de campo do formulário
     const modeloVal =
       safe(data.Modelo) ||
       safe(data.modelo) ||
       safe(data['Modelo do Veículo']) ||
-      safe(data['modelo do veículo']) ||
       safe(data.modeloVeiculo) ||
-      safe(data.ModeloVeiculo) ||
       safe(data.vehicleModel) ||
-      safe(data.vehicle_model) ||
       safe(data.model) ||
       '';
 
-    // Ano / Modelo
     const anoModeloVal =
       safe(data.AnoModelo) ||
       safe(data.anoModelo) ||
       safe(data.Ano) ||
       safe(data.ano) ||
       safe(data.vehicleYearModel) ||
-      safe(data.vehicle_year) ||
       '';
 
-    // Cidade
-    const cidadeVal =
-      safe(data.Cidade) || safe(data.cidade) || safe(data.city) || '';
-
-    // Telefone
-    const telefoneVal =
-      safe(data.Telefone) || safe(data.telefone) || safe(data.phone) || '';
-
-    // Tipo Seguro
+    const cidadeVal = safe(data.Cidade) || safe(data.cidade) || safe(data.city) || '';
+    const telefoneVal = safe(data.Telefone) || safe(data.telefone) || safe(data.phone) || '';
     const tipoSeguroVal =
-      safe(data.TipoSeguro) ||
-      safe(data.tipoSeguro) ||
-      safe(data.insuranceType) ||
-      safe(data.tipo_de_seguro) ||
-      '';
+      safe(data.TipoSeguro) || safe(data.tipoSeguro) || safe(data.insuranceType) || '';
 
     return {
       id: String(docId),
       ID: data.ID ?? data.id ?? docId,
       Nome: nomeVal,
       name: nomeVal,
-      Name: nomeVal,
-      // Mantemos ambos por compatibilidade, mas o campo principal para leadsFechados será "Modelo" (em pt)
       Modelo: modeloVal,
       vehicleModel: modeloVal,
       AnoModelo: anoModeloVal,
@@ -135,13 +122,9 @@ const Leads = ({
       TipoSeguro: tipoSeguroVal,
       insuranceType: tipoSeguroVal,
       status: typeof data.status === 'string' ? data.status : data.Status ?? '',
-      confirmado:
-        data.confirmado === true || data.confirmado === 'true' ? true : false,
+      confirmado: data.confirmado === true || data.confirmado === 'true',
       insurer: data.insurer ?? data.Seguradora ?? '',
-      insurerConfirmed:
-        data.insurerConfirmed === true || data.insurerConfirmed === 'true'
-          ? true
-          : false,
+      insurerConfirmed: data.insurerConfirmed === true || data.insurerConfirmed === 'true',
       usuarioId:
         data.usuarioId !== undefined && data.usuarioId !== null
           ? Number(data.usuarioId)
@@ -153,13 +136,11 @@ const Leads = ({
       VigenciaInicial: data.VigenciaInicial ?? data.vigenciaInicial ?? '',
       createdAt: toISO(data.createdAt ?? data.data ?? data.Data),
       responsavel: data.responsavel ?? data.Responsavel ?? '',
-      editado: data.editado ?? '',
       observacao: data.observacao ?? data.Observacao ?? '',
       agendamento: data.agendamento ?? data.Agendamento ?? '',
       agendados: data.agendados ?? false,
       MeioPagamento: data.MeioPagamento ?? '',
       CartaoPortoNovo: data.CartaoPortoNovo ?? '',
-      // Mantém demais campos brutos se houver necessidade
       ...data,
     };
   };
@@ -183,55 +164,18 @@ const Leads = ({
     }
   };
 
-  // Move lead para leadsFechados (mantive a função antiga caso queira usar)
+  // Move lead manualmente para leadsFechados (mantive função existente)
   const moveLeadToClosed = async (leadId, leadData = {}) => {
     try {
-      const nomeVal =
-        leadData.Nome ??
-        leadData.nome ??
-        leadData.Name ??
-        leadData.name ??
-        '';
-
-      const modeloVal =
-        leadData.Modelo ??
-        leadData.modelo ??
-        leadData['Modelo do Veículo'] ??
-        leadData['modelo do veículo'] ??
-        leadData.modeloVeiculo ??
-        leadData.vehicleModel ??
-        leadData.model ??
-        '';
-
-      const anoModeloVal =
-        leadData.AnoModelo ??
-        leadData.anoModelo ??
-        leadData.Ano ??
-        leadData.ano ??
-        leadData.vehicleYearModel ??
-        '';
-
-      const cidadeVal =
-        leadData.Cidade ?? leadData.cidade ?? leadData.city ?? '';
-
-      const telefoneVal =
-        leadData.Telefone ?? leadData.telefone ?? leadData.phone ?? '';
-
-      const tipoSeguroVal =
-        leadData.TipoSeguro ??
-        leadData.tipoSeguro ??
-        leadData.insuranceType ??
-        '';
-
       const payload = {
         ID: leadData.ID ?? leadData.id ?? String(leadId),
         id: String(leadId),
-        Nome: nomeVal,
-        Modelo: modeloVal,
-        AnoModelo: anoModeloVal,
-        Cidade: cidadeVal,
-        Telefone: telefoneVal,
-        TipoSeguro: tipoSeguroVal,
+        Nome: leadData.Nome ?? leadData.name ?? '',
+        Modelo: leadData.Modelo ?? leadData.vehicleModel ?? '',
+        AnoModelo: leadData.AnoModelo ?? leadData.vehicleYearModel ?? '',
+        Cidade: leadData.Cidade ?? leadData.city ?? '',
+        Telefone: leadData.Telefone ?? leadData.phone ?? '',
+        TipoSeguro: leadData.TipoSeguro ?? leadData.insuranceType ?? '',
         usuarioId: leadData.usuarioId ?? null,
         Seguradora: '',
         MeioPagamento: '',
@@ -260,71 +204,60 @@ const Leads = ({
       };
       await updateDoc(originalRef, updatePayload);
 
-      console.log(
-        `Lead ${leadId} copiado para leadsFechados (via moveLeadToClosed) e marcado como closed no leads.`
-      );
+      console.log(`Lead ${leadId} movida para leadsFechados.`);
     } catch (err) {
-      console.error('Erro ao mover/marcar lead como fechado (moveLeadToClosed):', err);
+      console.error('Erro ao mover lead para fechado:', err);
     }
   };
 
-  // Listener em tempo real para leads
+  // Listener em tempo real da coleção 'leads'
   useEffect(() => {
     setIsLoading(true);
-    try {
-      const collRef = collection(db, 'leads');
-      const unsub = onSnapshot(
-        collRef,
-        (snapshot) => {
-          const lista = snapshot.docs.map((d) => normalizeLead(d.id, d.data()));
+    const collRef = collection(db, 'leads');
+    const unsub = onSnapshot(
+      collRef,
+      (snapshot) => {
+        const lista = snapshot.docs.map((d) => normalizeLead(d.id, d.data()));
 
-          // Ordena localmente por createdAt (se existir)
-          lista.sort((a, b) => {
-            const da = a.createdAt ? new Date(a.createdAt) : new Date(0);
-            const dbb = b.createdAt ? new Date(b.createdAt) : new Date(0);
-            return dbb - da;
-          });
+        // Ordena por createdAt desc (quando disponível)
+        lista.sort((a, b) => {
+          const da = a.createdAt ? new Date(a.createdAt) : new Date(0);
+          const dbb = b.createdAt ? new Date(b.createdAt) : new Date(0);
+          return dbb - da;
+        });
 
-          setLeadsData(lista);
+        setLeadsData(lista);
 
-          // Atualiza observações e flags
-          const initialObservacoes = {};
-          const initialIsEditingObservacao = {};
-          lista.forEach((lead) => {
-            initialObservacoes[lead.id] = lead.observacao || '';
-            initialIsEditingObservacao[lead.id] =
-              !lead.observacao || lead.observacao.trim() === '';
-          });
-          setObservacoes(initialObservacoes);
-          setIsEditingObservacao(initialIsEditingObservacao);
+        // init observacoes
+        const initialObservacoes = {};
+        const initialIsEditingObservacao = {};
+        lista.forEach((lead) => {
+          initialObservacoes[lead.id] = lead.observacao || '';
+          initialIsEditingObservacao[lead.id] =
+            !lead.observacao || lead.observacao.trim() === '';
+        });
+        setObservacoes(initialObservacoes);
+        setIsEditingObservacao(initialIsEditingObservacao);
 
-          setIsLoading(false);
-        },
-        (err) => {
-          console.error('Erro no listener de leads:', err);
-          setIsLoading(false);
-        }
-      );
+        setIsLoading(false);
+      },
+      (err) => {
+        console.error('Erro no listener de leads:', err);
+        setIsLoading(false);
+      }
+    );
 
-      return () => {
-        unsub();
-      };
-    } catch (err) {
-      console.error('Erro ao iniciar listener de leads:', err);
-      setIsLoading(false);
-    }
+    return () => unsub();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fetch manual (mantido para botão Refresh)
+  // Fetch manual (botão refresh)
   const fetchLeadsFromFirebase = async () => {
     setIsLoading(true);
     try {
-      const querySnapshot = await getDocs(collection(db, 'leads'));
+      const qSnap = await getDocs(collection(db, 'leads'));
       const lista = [];
-      querySnapshot.forEach((docSnap) => {
-        lista.push(normalizeLead(docSnap.id, docSnap.data()));
-      });
+      qSnap.forEach((s) => lista.push(normalizeLead(s.id, s.data())));
 
       lista.sort((a, b) => {
         const da = a.createdAt ? new Date(a.createdAt) : new Date(0);
@@ -334,7 +267,6 @@ const Leads = ({
 
       setLeadsData(lista);
 
-      // Atualiza observações e flags com os dados do fetch manual também
       const initialObservacoes = {};
       const initialIsEditingObservacao = {};
       lista.forEach((lead) => {
@@ -344,16 +276,16 @@ const Leads = ({
       });
       setObservacoes(initialObservacoes);
       setIsEditingObservacao(initialIsEditingObservacao);
-    } catch (error) {
-      console.error('Erro ao buscar leads do Firebase:', error);
-      alert('Erro ao buscar leads do Firebase. Veja o console para detalhes.');
+    } catch (err) {
+      console.error('Erro ao buscar leads manualmente:', err);
+      alert('Erro ao buscar leads do Firebase. Veja o console.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const normalizarTexto = (texto = '') => {
-    return texto
+  const normalizarTexto = (texto = '') =>
+    texto
       .toString()
       .toLowerCase()
       .normalize('NFD')
@@ -361,22 +293,16 @@ const Leads = ({
       .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()@\+\?><\[\]\+]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
-  };
 
-  const isStatusAgendado = (status) => {
-    return typeof status === 'string' && status.startsWith('Agendado');
-  };
-
+  const isStatusAgendado = (status) => typeof status === 'string' && status.startsWith('Agendado');
   const extractStatusDate = (status) => {
     if (typeof status !== 'string') return null;
     const parts = status.split(' - ');
     return parts.length > 1 ? parts[1] : null;
   };
 
-  // -------------------------
-  // VISIBILITY: apenas admin vê todos; usuário vê apenas os leads atribuídos a ele
-  // -------------------------
-  const isAdmin = usuarioLogado?.tipo === 'Admin';
+  // VISIBILITY: Admin vs Usuario
+  const isAdmin = usuarioLogado?.tipo === 'Admin' || usuarioLogado?.role === 'Admin';
 
   const getCurrentUserFromPropOrStorage = () => {
     if (usuarioLogado) return usuarioLogado;
@@ -384,7 +310,7 @@ const Leads = ({
       const raw = localStorage.getItem('user');
       if (!raw) return null;
       return JSON.parse(raw);
-    } catch (e) {
+    } catch {
       return null;
     }
   };
@@ -394,29 +320,24 @@ const Leads = ({
     const user = getCurrentUserFromPropOrStorage();
     if (!user) return false;
 
-    // user id values could be in different keys
     const userId = String(user.id ?? user.ID ?? user.userId ?? '').trim();
     const userNome = String(user.nome ?? user.name ?? user.usuario ?? '').trim().toLowerCase();
 
-    // lead.usuarioId can be number or string
     const leadUsuarioId = lead.usuarioId !== undefined && lead.usuarioId !== null ? String(lead.usuarioId).trim() : '';
     if (leadUsuarioId && userId && leadUsuarioId === userId) return true;
 
-    // Compare responsavel / Responsavel names
     const leadResponsavel = String(lead.responsavel ?? lead.Responsavel ?? '').trim().toLowerCase();
     if (leadResponsavel && userNome && leadResponsavel === userNome) return true;
 
-    // Fallback: raw.usuario/login match
     const leadUsuarioLogin = String(lead.usuario ?? lead.user ?? lead.raw?.usuario ?? lead.raw?.user ?? '').trim();
     const userLogin = String(user.usuario ?? '').trim();
     if (leadUsuarioLogin && userLogin && leadUsuarioLogin === userLogin) return true;
 
     return false;
   };
-  // -------------------------
 
+  // Contagens (somente leads visíveis)
   const contagens = useMemo(() => {
-    // Work off visible leads only
     const visibleLeads = leadsData.filter((l) => canViewLead(l));
     let emContatoCount = 0;
     let semContatoCount = 0;
@@ -430,18 +351,14 @@ const Leads = ({
         todosCount++;
       }
 
-      if (s === 'Em Contato') {
-        emContatoCount++;
-      } else if (s === 'Sem Contato') {
-        semContatoCount++;
-      } else if (isStatusAgendado(s)) {
+      if (s === 'Em Contato') emContatoCount++;
+      else if (s === 'Sem Contato') semContatoCount++;
+      else if (isStatusAgendado(s)) {
         const statusDateStr = extractStatusDate(s);
         if (statusDateStr) {
           const [dia, mes, ano] = statusDateStr.split('/');
           const statusDateFormatted = new Date(`${ano}-${mes}-${dia}T00:00:00`).toLocaleDateString('pt-BR');
-          if (statusDateFormatted === today) {
-            agendadosCount++;
-          }
+          if (statusDateFormatted === today) agendadosCount++;
         }
       }
     });
@@ -452,7 +369,7 @@ const Leads = ({
       agendadosHoje: agendadosCount,
       todosPendentes: todosCount,
     };
-  }, [leadsData, usuarioLogado]); // recalcula quando leadsData ou usuarioLogado mudar
+  }, [leadsData, usuarioLogado]);
 
   useEffect(() => {
     setHasScheduledToday(contagens.agendadosHoje > 0);
@@ -499,69 +416,63 @@ const Leads = ({
     return filtroMesAno === `${leadAno}-${leadMes}`;
   };
 
-  const nomeContemFiltro = (leadNome, filtroNome) => {
-    if (!filtroNome) return true;
+  const nomeContemFiltro = (leadNome, filtroNomeArg) => {
+    if (!filtroNomeArg) return true;
     if (!leadNome) return false;
     const nomeNormalizado = normalizarTexto(leadNome);
-    const filtroNormalizado = normalizarTexto(filtroNome);
+    const filtroNormalizado = normalizarTexto(filtroNomeArg);
     return nomeNormalizado.includes(filtroNormalizado);
   };
 
-  // Filtra por visibilidade primeiro (apenas leads atribuídos ao usuário, salvo Admin)
+  // Leads visíveis (filtragem por visibilidade)
   const visibleLeadsAll = leadsData.filter((lead) => canViewLead(lead));
 
-  // ---------- Leads Fechados (novo): somente insurerConfirmed === true ----------
+  // Leads fechados: insurerConfirmed === true
   const fechadosFiltered = visibleLeadsAll
     .filter((lead) => lead.insurerConfirmed === true)
     .filter((lead) => {
-      // Aplica filtros por data/nome quando houver (não aplica filtroStatus específico aqui)
       if (filtroData) {
         const leadMesAno = lead.createdAt ? String(lead.createdAt).substring(0, 7) : '';
         if (leadMesAno !== filtroData) return false;
       }
-
       if (filtroNome) {
         if (!nomeContemFiltro(lead.Nome || lead.name || lead.nome, filtroNome)) return false;
       }
-
       return true;
     });
 
-  // ---------- Leads Gerais (fluxo original): exclui Fechado e Perdido ----------
-  const gerais = visibleLeadsAll
-    .filter((lead) => {
-      const s = lead.status ?? '';
-      if (s === 'Fechado' || s === 'Perdido') return false;
+  // Leads gerais (exclui Fechado e Perdido)
+  const gerais = visibleLeadsAll.filter((lead) => {
+    const s = lead.status ?? '';
+    if (s === 'Fechado' || s === 'Perdido') return false;
 
-      if (filtroStatus) {
-        if (filtroStatus === 'Agendado') {
-          const today = new Date();
-          const todayFormatted = today.toLocaleDateString('pt-BR');
-          const statusDateStr = extractStatusDate(lead.status);
-          if (!statusDateStr) return false;
-          const [dia, mes, ano] = statusDateStr.split('/');
-          const statusDate = new Date(`${ano}-${mes}-${dia}T00:00:00`);
-          const statusDateFormatted = statusDate.toLocaleDateString('pt-BR');
-          return isStatusAgendado(lead.status) && statusDateFormatted === todayFormatted;
-        }
-        return lead.status === filtroStatus;
+    if (filtroStatus) {
+      if (filtroStatus === 'Agendado') {
+        const today = new Date();
+        const todayFormatted = today.toLocaleDateString('pt-BR');
+        const statusDateStr = extractStatusDate(lead.status);
+        if (!statusDateStr) return false;
+        const [dia, mes, ano] = statusDateStr.split('/');
+        const statusDate = new Date(`${ano}-${mes}-${dia}T00:00:00`);
+        const statusDateFormatted = statusDate.toLocaleDateString('pt-BR');
+        return isStatusAgendado(lead.status) && statusDateFormatted === todayFormatted;
       }
+      return lead.status === filtroStatus;
+    }
 
-      if (filtroData) {
-        const leadMesAno = lead.createdAt ? String(lead.createdAt).substring(0, 7) : '';
-        if (leadMesAno !== filtroData) return false;
-      }
+    if (filtroData) {
+      const leadMesAno = lead.createdAt ? String(lead.createdAt).substring(0, 7) : '';
+      if (leadMesAno !== filtroData) return false;
+    }
 
-      if (filtroNome) {
-        if (!nomeContemFiltro(lead.Nome || lead.name || lead.nome, filtroNome)) return false;
-      }
+    if (filtroNome) {
+      if (!nomeContemFiltro(lead.Nome || lead.name || lead.nome, filtroNome)) return false;
+    }
 
-      return true;
-    });
+    return true;
+  });
 
-  // Escolhe qual lista exibir com base na prop showFechados
   const leadsForDisplay = showFechados ? fechadosFiltered : gerais;
-
   const totalPaginas = Math.max(1, Math.ceil(leadsForDisplay.length / leadsPorPagina));
   const paginaCorrigida = Math.min(paginaAtual, totalPaginas);
   const inicio = (paginaCorrigida - 1) * leadsPorPagina;
@@ -571,10 +482,7 @@ const Leads = ({
   const usuariosAtivos = usuarios ? usuarios.filter((u) => u.status === 'Ativo') : [];
 
   const handleSelect = (leadId, userId) => {
-    setSelecionados((prev) => ({
-      ...prev,
-      [leadId]: Number(userId),
-    }));
+    setSelecionados((prev) => ({ ...prev, [leadId]: Number(userId) }));
   };
 
   const enviarLeadAtualizado = async (lead) => {
@@ -594,12 +502,10 @@ const Leads = ({
 
   const handleEnviar = (leadId) => {
     const finalUserId = selecionados[leadId];
-
     if (!finalUserId) {
       alert('Selecione um usuário antes de enviar.');
       return;
     }
-
     if (typeof saveLocalChange === 'function') {
       saveLocalChange({
         id: leadId,
@@ -607,15 +513,12 @@ const Leads = ({
         data: { leadId, usuarioId: finalUserId },
       });
     }
-
     transferirLead(leadId, finalUserId);
 
     const usuario = usuariosAtivos.find((u) => String(u.id) === String(finalUserId));
     const responsavelNome = usuario ? usuario.nome : null;
-
     const lead = leadsData.find((l) => l.id === leadId);
     const leadAtualizado = { ...lead, usuarioId: finalUserId, responsavel: responsavelNome };
-
     enviarLeadAtualizado(leadAtualizado);
   };
 
@@ -627,13 +530,8 @@ const Leads = ({
         data: { leadId, usuarioId: null },
       });
     }
-
-    setSelecionados((prev) => ({
-      ...prev,
-      [leadId]: '',
-    }));
+    setSelecionados((prev) => ({ ...prev, [leadId]: '' }));
     transferirLead(leadId, null);
-
     try {
       const leadRef = doc(db, 'leads', leadId);
       await updateDoc(leadRef, { usuarioId: null, responsavel: null });
@@ -645,10 +543,7 @@ const Leads = ({
 
   const scrollToTop = () => {
     if (scrollContainerRef && scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTo({
-        top: 0,
-        behavior: 'smooth',
-      });
+      scrollContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
@@ -674,10 +569,7 @@ const Leads = ({
   };
 
   const handleObservacaoChange = (leadId, text) => {
-    setObservacoes((prev) => ({
-      ...prev,
-      [leadId]: text,
-    }));
+    setObservacoes((prev) => ({ ...prev, [leadId]: text }));
   };
 
   const handleSalvarObservacao = async (leadId) => {
@@ -686,7 +578,6 @@ const Leads = ({
       alert('Por favor, digite uma observação antes de salvar.');
       return;
     }
-
     setIsLoading(true);
     try {
       if (typeof saveLocalChange === 'function') {
@@ -696,7 +587,6 @@ const Leads = ({
           data: { leadId, observacao: observacaoTexto },
         });
       }
-
       const leadRef = doc(db, 'leads', leadId);
       await updateDoc(leadRef, { observacao: observacaoTexto });
       setIsEditingObservacao((prev) => ({ ...prev, [leadId]: false }));
@@ -723,7 +613,6 @@ const Leads = ({
   };
 
   const handleConfirmStatus = async (leadId, novoStatus, phoneOrDate) => {
-    // Se for Fechado -> abrir modal de fechamento
     if (novoStatus === 'Fechado') {
       const lead = leadsData.find((l) => String(l.id) === String(leadId));
       if (!lead) {
@@ -734,7 +623,6 @@ const Leads = ({
       return;
     }
 
-    // fluxo antigo para outros statuses
     if (typeof saveLocalChange === 'function') {
       saveLocalChange({
         id: leadId,
@@ -785,21 +673,14 @@ const Leads = ({
       }
 
       const observacaoAtual = observacoes[leadId];
-      if (observacaoAtual && observacaoAtual.trim() !== '') {
-        dataToUpdate.observacao = observacaoAtual;
-      }
-
-      if (agendamento) {
-        dataToUpdate.agendamento = agendamento;
-      } else {
-        dataToUpdate.agendamento = null;
-      }
+      if (observacaoAtual && observacaoAtual.trim() !== '') dataToUpdate.observacao = observacaoAtual;
+      if (agendamento) dataToUpdate.agendamento = agendamento;
+      else dataToUpdate.agendamento = null;
 
       await updateDoc(leadRef, dataToUpdate);
 
       const currentLead = leadsData.find((l) => l.id === leadId);
-      const hasNoObservacao =
-        !currentLead || !currentLead.observacao || currentLead.observacao.trim() === '';
+      const hasNoObservacao = !currentLead || !currentLead.observacao || currentLead.observacao.trim() === '';
 
       if (
         (finalStatus === 'Em Contato' ||
@@ -819,13 +700,13 @@ const Leads = ({
     }
   };
 
-  // ---------------- Modal: funções auxiliares ----------------
+  // Modal helpers
   const toDateInputValue = (date = new Date()) => {
     const d = new Date(date);
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const dd = String(d.getDate()).padStart(2, '0');
     const yyyy = d.getFullYear();
-    return `${yyyy}-${mm}-${dd}`; // formato para <input type="date">
+    return `${yyyy}-${mm}-${dd}`;
   };
 
   const addOneYearDateInputValue = (date = new Date()) => {
@@ -834,7 +715,6 @@ const Leads = ({
     return toDateInputValue(d);
   };
 
-  // Formatação de moeda para input: aceita digitação de números e formata como R$
   const formatCurrencyFromDigits = (digits) => {
     if (!digits) return '';
     const int = parseInt(digits, 10);
@@ -847,16 +727,14 @@ const Leads = ({
 
   const handlePremioChange = (e) => {
     const raw = e.target.value;
-    // permitimos que o usuário cole ou digite já formatado; extraímos dígitos e formatamos
     const digits = extractDigits(raw);
     const formatted = digits ? formatCurrencyFromDigits(digits) : '';
     setModalPremioLiquido(formatted);
   };
 
-  // Comissão: mantemos número inteiro e adicionamos '%'
   const handleComissaoChange = (e) => {
     const raw = e.target.value;
-    const digits = extractDigits(raw).slice(0, 3); // até 3 dígitos (ex: 100%)
+    const digits = extractDigits(raw).slice(0, 3);
     if (!digits) {
       setModalComissao('');
       return;
@@ -869,10 +747,8 @@ const Leads = ({
     setModalNome(lead.Nome || lead.name || lead.nome || '');
     setModalSeguradora(lead.Seguradora || lead.insurer || '');
     setModalMeioPagamento(lead.MeioPagamento || '');
-    // CartaoPortoNovo deve ser 'Sim' ou 'Não'
     setModalCartaoPortoNovo(lead.CartaoPortoNovo ? String(lead.CartaoPortoNovo) : 'Não');
     setModalPremioLiquido(lead.PremioLiquido ? String(lead.PremioLiquido) : '');
-    // se a comissao vier como '10%' mantém; se vier '10' converte
     const com = lead.Comissao ?? lead.comissao ?? '';
     setModalComissao(com ? (String(com).includes('%') ? String(com) : `${String(extractDigits(com) || com)}%`) : '');
     setModalParcelamento(lead.Parcelamento ? String(lead.Parcelamento) : '1');
@@ -888,18 +764,15 @@ const Leads = ({
     setIsSubmittingClose(false);
   };
 
-  // Ao submeter o fechamento (Concluir Venda)
+  // Concluir venda: grava em leadsFechados e atualiza lead original com insurerConfirmed true
   const handleConcluirVenda = async () => {
     if (!closingLead) return;
     setIsSubmittingClose(true);
-
     try {
       const leadId = String(closingLead.id);
-      // Converte datas do input para ISO strings
       const vigIniISO = modalVigenciaInicial ? new Date(`${modalVigenciaInicial}T00:00:00`).toISOString() : '';
       const vigFinISO = modalVigenciaFinal ? new Date(`${modalVigenciaFinal}T00:00:00`).toISOString() : '';
 
-      // Monta payload para leadsFechados (campos em português conforme pedido)
       const payload = {
         ID: closingLead.ID ?? closingLead.id ?? leadId,
         id: leadId,
@@ -927,24 +800,17 @@ const Leads = ({
         closedAt: serverTimestamp(),
       };
 
-      // Salva em leadsFechados com ID fixo igual ao leadId (document id do Firestore)
       const closedRef = doc(db, 'leadsFechados', leadId);
       await setDoc(closedRef, payload);
 
-      // --- NOVO: grava também em 'renovacoes' (mesmo payload, mesmo doc id) ---
+      // grava também em 'renovacoes' (opcional)
       try {
         const renovRef = doc(db, 'renovacoes', leadId);
-        const renovPayload = {
-          ...payload,
-          registeredAt: serverTimestamp(),
-        };
-        await setDoc(renovRef, renovPayload);
+        await setDoc(renovRef, { ...payload, registeredAt: serverTimestamp() });
       } catch (errRenov) {
         console.error('Erro ao gravar em renovacoes:', errRenov);
       }
-      // --- FIM gravação em renovacoes ---
 
-      // Atualiza lead original: status, closedAt e campos de venda/nome e insurerConfirmed true
       const originalRef = doc(db, 'leads', leadId);
       const updatePayload = {
         status: 'Fechado',
@@ -962,7 +828,6 @@ const Leads = ({
         insurerConfirmed: true,
       };
 
-      // aplica também saveLocalChange para manter sincronização local se existir a função
       if (typeof saveLocalChange === 'function') {
         saveLocalChange({
           id: leadId,
@@ -984,7 +849,6 @@ const Leads = ({
 
       await updateDoc(originalRef, updatePayload);
 
-      // sucesso: fecha modal e deixa o listener atualizar a lista automaticamente
       closeClosingModal();
       alert('Venda concluída e registrada em leadsFechados com sucesso.');
     } catch (err) {
@@ -994,7 +858,7 @@ const Leads = ({
     }
   };
 
-  // Listas fixas
+  // Opções estáticas
   const seguradoraOptions = [
     '',
     'Porto Seguro',
@@ -1012,7 +876,6 @@ const Leads = ({
     'Alfa Seguros',
     'Demais Seguradoras',
   ];
-
   const meioPagamentoOptions = ['', 'CP', 'CC', 'Debito', 'Boleto'];
 
   return (
@@ -1030,7 +893,7 @@ const Leads = ({
       )}
 
       <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-        <div className="flex flex-wrap itens-center justify-between gap-4 border-b pb-4 mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b pb-4 mb-4">
           <h1 className="text-4xl font-extrabold text-gray-900 flex items-center">
             <Bell size={32} className="text-indigo-500 mr-3" />
             {showFechados ? 'Leads Fechados' : 'Leads'}
@@ -1041,9 +904,12 @@ const Leads = ({
               title="Atualizar dados"
               onClick={handleRefreshLeads}
               disabled={isLoading}
-              className={`p-3 rounded-full transition duration-300 ${isLoading ? 'text-gray-400 cursor-not-allowed' : 'text-indigo-600 hover:bg-indigo-100 shadow-sm'}`}
+              className={classNames(
+                'p-3 rounded-full transition duration-300',
+                isLoading ? 'text-gray-400 cursor-not-allowed' : 'text-indigo-600 hover:bg-indigo-100 shadow-sm'
+              )}
             >
-              <RefreshCcw size={24} className={isLoading ? '' : 'hover:rotate-180'} />
+              <RefreshCcw size={24} />
             </button>
 
             {hasScheduledToday && !showFechados && (
@@ -1105,20 +971,20 @@ const Leads = ({
       <div className="flex flex-wrap gap-3 justify-center mb-8">
         <button
           onClick={() => aplicarFiltroStatus('Em Contato')}
-          className={`
-            px-5 py-2 rounded-full font-bold transition duração-300 shadow-lg
-            ${filtroStatus === 'Em Contato' ? 'bg-orange-600 text-white ring-2 ring-orange-400' : 'bg-orange-500 text-white hover:bg-orange-600'}
-          `}
+          className={classNames(
+            'px-5 py-2 rounded-full font-bold transition duration-300 shadow-lg',
+            filtroStatus === 'Em Contato' ? 'bg-orange-600 text-white ring-2 ring-orange-400' : 'bg-orange-500 text-white hover:bg-orange-600'
+          )}
         >
           Em Contato <span className="text-sm font-extrabold ml-1">({contagens.emContato})</span>
         </button>
 
         <button
           onClick={() => aplicarFiltroStatus('Sem Contato')}
-          className={`
-            px-5 py-2 rounded-full font-bold transition duração-300 shadow-lg
-            ${filtroStatus === 'Sem Contato' ? 'bg-gray-700 text-white ring-2 ring-gray-400' : 'bg-gray-500 text-white hover:bg-gray-600'}
-          `}
+          className={classNames(
+            'px-5 py-2 rounded-full font-bold transition duration-300 shadow-lg',
+            filtroStatus === 'Sem Contato' ? 'bg-gray-700 text-white ring-2 ring-gray-400' : 'bg-gray-500 text-white hover:bg-gray-600'
+          )}
         >
           Sem Contato <span className="text-sm font-extrabold ml-1">({contagens.semContato})</span>
         </button>
@@ -1126,20 +992,21 @@ const Leads = ({
         {contagens.agendadosHoje > 0 && !showFechados && (
           <button
             onClick={() => aplicarFiltroStatus('Agendado')}
-            className={`
-              px-5 py-2 rounded-full font-bold transition duração-300 shadow-lg
-              ${filtroStatus === 'Agendado' ? 'bg-blue-700 text-white ring-2 ring-blue-400' : 'bg-blue-500 text-white hover:bg-blue-600'}
-            >
-              Agendados <span className="text-sm font-extrabold ml-1">({contagens.agendadosHoje})</span>
-            </button>
+            className={classNames(
+              'px-5 py-2 rounded-full font-bold transition duration-300 shadow-lg',
+              filtroStatus === 'Agendado' ? 'bg-blue-700 text-white ring-2 ring-blue-400' : 'bg-blue-500 text-white hover:bg-blue-600'
+            )}
+          >
+            Agendados <span className="text-sm font-extrabold ml-1">({contagens.agendadosHoje})</span>
+          </button>
         )}
 
         <button
           onClick={() => aplicarFiltroStatus(null)}
-          className={`
-            px-5 py-2 rounded-full font-bold transition duração-300 shadow-lg
-            ${filtroStatus === null ? 'bg-gray-800 text-white ring-2 ring-gray-500' : 'bg-gray-600 text-white hover:bg-gray-700'}
-          `}
+          className={classNames(
+            'px-5 py-2 rounded-full font-bold transition duration-300 shadow-lg',
+            filtroStatus === null ? 'bg-gray-800 text-white ring-2 ring-gray-500' : 'bg-gray-600 text-white hover:bg-gray-700'
+          )}
         >
           Todos <span className="text-sm font-extrabold ml-1">{!showFechados ? `(${contagens.todosPendentes})` : `(${fechadosFiltered.length})`}</span>
         </button>
@@ -1163,13 +1030,9 @@ const Leads = ({
                   key={lead.id}
                   className="bg-white rounded-xl shadow-lg hover:shadow-xl transition duration-300 p-6 relative border-t-4 border-indigo-500"
                 >
-                  <div className={`grid ${hasObservacaoSection ? 'lg:grid-cols-2' : 'lg:grid-cols-1'} gap-6`}>
+                  <div className={classNames('grid', hasObservacaoSection ? 'lg:grid-cols-2' : 'lg:grid-cols-1', 'gap-6')}>
                     <div className="space-y-4">
-                      <Lead
-                        lead={lead}
-                        onUpdateStatus={handleConfirmStatus}
-                        disabledConfirm={!lead.responsavel}
-                      />
+                      <Lead lead={lead} onUpdateStatus={handleConfirmStatus} disabledConfirm={!lead.responsavel} />
 
                       <div className="pt-4 border-t border-gray-100 mt-4">
                         {lead.responsavel && responsavel ? (
@@ -1194,11 +1057,7 @@ const Leads = ({
                               className="p-2 border border-gray-300 rounded-md text-sm shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
                             >
                               <option value="">Selecione usuário ativo</option>
-                              {usuariosAtivos.map((u) => (
-                                <option key={u.id} value={u.id}>
-                                  {u.nome}
-                                </option>
-                              ))}
+                              {usuariosAtivos.map((u) => <option key={u.id} value={u.id}>{u.nome}</option>)}
                             </select>
                             <button
                               onClick={() => handleEnviar(lead.id)}
@@ -1213,9 +1072,7 @@ const Leads = ({
 
                     {hasObservacaoSection && (
                       <div className="lg:border-l lg:border-gray-200 lg:pl-6 space-y-3">
-                        <label htmlFor={`observacao-${lead.id}`} className="block text-sm font-semibold text-gray-700">
-                          Observações:
-                        </label>
+                        <label htmlFor={`observacao-${lead.id}`} className="block text-sm font-semibold text-gray-700">Observações:</label>
                         <textarea
                           id={`observacao-${lead.id}`}
                           value={observacoes[lead.id] || ''}
@@ -1223,24 +1080,17 @@ const Leads = ({
                           placeholder="Adicione suas observações aqui..."
                           rows="3"
                           disabled={!isEditingObservacao[lead.id]}
-                          className={`
-                            w-full p-3 rounded-lg border text-sm resize-y shadow-sm
-                            ${isEditingObservacao[lead.id] ? 'bg-white border-indigo-500 focus:ring-indigo-500' : 'bg-gray-50 border-gray-200 cursor-not-allowed'}
-                          `}
-                        ></textarea>
-
+                          className={classNames(
+                            'w-full p-3 rounded-lg border text-sm resize-y shadow-sm',
+                            isEditingObservacao[lead.id] ? 'bg-white border-indigo-500 focus:ring-indigo-500' : 'bg-gray-50 border-gray-200 cursor-not-allowed'
+                          )}
+                        />
                         {isEditingObservacao[lead.id] ? (
-                          <button
-                            onClick={() => handleSalvarObservacao(lead.id)}
-                            className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition duration-150 font-bold shadow-md"
-                          >
+                          <button onClick={() => handleSalvarObservacao(lead.id)} className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition duration-150 font-bold shadow-md">
                             Salvar Observação
                           </button>
                         ) : (
-                          <button
-                            onClick={() => handleAlterarObservacao(lead.id)}
-                            className="px-4 py-2 bg-yellow-400 text-gray-900 rounded-md hover:bg-yellow-500 transition duration-150 font-bold shadow-md"
-                          >
+                          <button onClick={() => handleAlterarObservacao(lead.id)} className="px-4 py-2 bg-yellow-400 text-gray-900 rounded-md hover:bg-yellow-500 transition duration-150 font-bold shadow-md">
                             Alterar Observação
                           </button>
                         )}
@@ -1248,10 +1098,7 @@ const Leads = ({
                     )}
                   </div>
 
-                  <div
-                    className="absolute bottom-2 right-4 text-xs text-gray-400 italic"
-                    title={`Criado em: ${formatarData(lead.createdAt)}`}
-                  >
+                  <div className="absolute bottom-2 right-4 text-xs text-gray-400 italic" title={`Criado em: ${formatarData(lead.createdAt)}`}>
                     Criado em: {formatarData(lead.createdAt)}
                   </div>
                 </div>
@@ -1262,27 +1109,23 @@ const Leads = ({
               <button
                 onClick={handlePaginaAnterior}
                 disabled={paginaCorrigida <= 1 || isLoading}
-                className={`px-4 py-2 rounded-lg border texto-sm font-medium transition duration-150 shadow-md ${
-                  (paginaCorrigida <= 1 || isLoading)
-                    ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                    : 'bg-white border-indigo-500 text-indigo-600 hover:bg-indigo-50'
-                }`}
+                className={classNames(
+                  'px-4 py-2 rounded-lg border text-sm font-medium transition duration-150 shadow-md',
+                  (paginaCorrigida <= 1 || isLoading) ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-white border-indigo-500 text-indigo-600 hover:bg-indigo-50'
+                )}
               >
                 Anterior
               </button>
 
-              <span className="text-gray-700 font-semibold">
-                Página {paginaCorrigida} de {totalPaginas}
-              </span>
+              <span className="text-gray-700 font-semibold">Página {paginaCorrigida} de {totalPaginas}</span>
 
               <button
                 onClick={handlePaginaProxima}
                 disabled={paginaCorrigida >= totalPaginas || isLoading}
-                className={`px-4 py-2 rounded-lg border texto-sm font-medium transition duração-150 shadow-md ${
-                  (paginaCorrigida >= totalPaginas || isLoading)
-                    ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                    : 'bg-white border-indigo-500 text-indigo-600 hover:bg-indigo-50'
-                }`}
+                className={classNames(
+                  'px-4 py-2 rounded-lg border text-sm font-medium transition duration-150 shadow-md',
+                  (paginaCorrigida >= totalPaginas || isLoading) ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-white border-indigo-500 text-indigo-600 hover:bg-indigo-50'
+                )}
               >
                 Próxima
               </button>
@@ -1291,7 +1134,7 @@ const Leads = ({
         )}
       </div>
 
-      {/* Modal de Concluir Venda */}
+      {/* Modal de Concluir Venda (simplificado) */}
       {isClosingModalOpen && closingLead && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 px-4">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl p-6 relative">
@@ -1310,49 +1153,26 @@ const Leads = ({
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700">Seguradora</label>
-                <select
-                  value={modalSeguradora}
-                  onChange={(e) => setModalSeguradora(e.target.value)}
-                  className="mt-1 w-full p-2 border rounded text-sm"
-                >
-                  {seguradoraOptions.map((opt) => (
-                    <option key={opt} value={opt}>{opt === '' ? '— selecione —' : opt}</option>
-                  ))}
+                <select value={modalSeguradora} onChange={(e) => setModalSeguradora(e.target.value)} className="mt-1 w-full p-2 border rounded text-sm">
+                  {seguradoraOptions.map((opt) => <option key={opt} value={opt}>{opt === '' ? '— selecione —' : opt}</option>)}
                 </select>
               </div>
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700">Meio de pagamento</label>
-                <select
-                  value={modalMeioPagamento}
-                  onChange={(e) => {
-                    setModalMeioPagamento(e.target.value);
-                    // se mudar para CP inicia Cartao como 'Não' por padrão
-                    if (e.target.value === 'CP' && (!modalCartaoPortoNovo || modalCartaoPortoNovo === '')) {
-                      setModalCartaoPortoNovo('Não');
-                    }
-                    // se tirar CP, limpa CartaoPortoNovo
-                    if (e.target.value !== 'CP') {
-                      setModalCartaoPortoNovo('Não');
-                    }
-                  }}
-                  className="mt-1 w-full p-2 border rounded text-sm"
-                >
-                  {meioPagamentoOptions.map((m) => (
-                    <option key={m} value={m}>{m === '' ? '— selecione —' : m}</option>
-                  ))}
+                <select value={modalMeioPagamento} onChange={(e) => {
+                  setModalMeioPagamento(e.target.value);
+                  if (e.target.value === 'CP' && (!modalCartaoPortoNovo || modalCartaoPortoNovo === '')) setModalCartaoPortoNovo('Não');
+                  if (e.target.value !== 'CP') setModalCartaoPortoNovo('Não');
+                }} className="mt-1 w-full p-2 border rounded text-sm">
+                  {meioPagamentoOptions.map((m) => <option key={m} value={m}>{m === '' ? '— selecione —' : m}</option>)}
                 </select>
               </div>
 
-              {/* Cartao Porto Seguro Novo: aparece somente se MeioPagamento === 'CP' */}
               {modalMeioPagamento === 'CP' && (
                 <div>
                   <label className="block text-sm font-semibold text-gray-700">Cartão Porto Seguro Novo?</label>
-                  <select
-                    value={modalCartaoPortoNovo}
-                    onChange={(e) => setModalCartaoPortoNovo(e.target.value)}
-                    className="mt-1 w-full p-2 border rounded text-sm"
-                  >
+                  <select value={modalCartaoPortoNovo} onChange={(e) => setModalCartaoPortoNovo(e.target.value)} className="mt-1 w-full p-2 border rounded text-sm">
                     <option value="Sim">Sim</option>
                     <option value="Não">Não</option>
                   </select>
@@ -1361,34 +1181,18 @@ const Leads = ({
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700">Prêmio Líquido</label>
-                <input
-                  value={modalPremioLiquido}
-                  onChange={handlePremioChange}
-                  placeholder="R$ 0,00"
-                  className="mt-1 w-full p-2 border rounded text-sm"
-                />
+                <input value={modalPremioLiquido} onChange={handlePremioChange} placeholder="R$ 0,00" className="mt-1 w-full p-2 border rounded text-sm" />
               </div>
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700">Comissão</label>
-                <input
-                  value={modalComissao}
-                  onChange={handleComissaoChange}
-                  placeholder="10%"
-                  className="mt-1 w-full p-2 border rounded text-sm"
-                />
+                <input value={modalComissao} onChange={handleComissaoChange} placeholder="10%" className="mt-1 w-full p-2 border rounded text-sm" />
               </div>
 
               <div>
                 <label className="block text-sm font-semibold text-gray-700">Parcelamento</label>
-                <select
-                  value={modalParcelamento}
-                  onChange={(e) => setModalParcelamento(e.target.value)}
-                  className="mt-1 w-full p-2 border rounded text-sm"
-                >
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
-                    <option key={n} value={String(n)}>{String(n)}</option>
-                  ))}
+                <select value={modalParcelamento} onChange={(e) => setModalParcelamento(e.target.value)} className="mt-1 w-full p-2 border rounded text-sm">
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => <option key={n} value={String(n)}>{String(n)}</option>)}
                 </select>
               </div>
 
@@ -1396,7 +1200,6 @@ const Leads = ({
                 <label className="block text-sm font-semibold text-gray-700">Vigência Inicial</label>
                 <input type="date" value={modalVigenciaInicial} onChange={(e) => {
                   setModalVigenciaInicial(e.target.value);
-                  // atualiza final automaticamente para +1 ano quando inicial muda
                   try {
                     const d = new Date(`${e.target.value}T00:00:00`);
                     d.setFullYear(d.getFullYear() + 1);
@@ -1412,9 +1215,7 @@ const Leads = ({
             </div>
 
             <div className="mt-6 flex justify-end gap-3">
-              <button onClick={closeClosingModal} disabled={isSubmittingClose} className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300">
-                Cancelar
-              </button>
+              <button onClick={closeClosingModal} disabled={isSubmittingClose} className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300">Cancelar</button>
               <button onClick={handleConcluirVenda} disabled={isSubmittingClose} className="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-700">
                 {isSubmittingClose ? 'Processando...' : 'Concluir Venda'}
               </button>
