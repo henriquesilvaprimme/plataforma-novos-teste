@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import Lead from './components/Lead'; // Corrigido para Lead
+import LeadRenovacoes from './components/LeadRenovacoes'; // Corrigido para LeadRenovacoes
 import { RefreshCcw, Bell, Search, Send, Edit, Save, User, ChevronLeft, ChevronRight } from 'lucide-react';
 import { collection, onSnapshot, doc, updateDoc, query, orderBy } from 'firebase/firestore';
 import { db } from './firebase'; // ajuste o caminho se necessário
@@ -673,7 +673,7 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
                                             {getFullStatus(lead.status)}
                                         </span>
                                     </div>
-                                    <Lead 
+                                    <LeadRenovacoes 
                                         lead={lead} 
                                         onUpdateStatus={handleConfirmStatus} 
                                         disabledConfirm={!isAtribuido} 
