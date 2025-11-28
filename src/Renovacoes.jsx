@@ -649,10 +649,10 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
             const vigIniISO = modalVigenciaInicial ? new Date(`${modalVigenciaInicial}T00:00:00`).toISOString() : '';
             const vigFinISO = modalVigenciaFinal ? new Date(`${modalVigenciaFinal}T00:00:00`).toISOString() : '';
 
-            // --- NOVO: grava também em 'renovacoes' (mesmo payload, mas com novo ID) ---
+            // --- NOVO: grava também em 'renovados' (mesmo payload, mas com novo ID) ---
             try {
-                const renovacoesCollectionRef = collection(db, 'renovacoes');
-                const newRenovDocRef = doc(renovacoesCollectionRef); // Gera um novo ID para o documento
+                const renovadosCollectionRef = collection(db, 'renovados');
+                const newRenovDocRef = doc(renovadosCollectionRef); // Gera um novo ID para o documento
                 const newLeadId = newRenovDocRef.id;
 
                 const renovPayload = {
@@ -674,20 +674,20 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
                     Parcelamento: modalParcelamento || '',
                     VigenciaInicial: vigIniISO || '',
                     VigenciaFinal: vigFinISO || '',
-                    Status: '', // Status sem preenchimento
+                    Status: 'Fechado', // Status preenchido como Fechado
                     Observacao: closingLead.observacao ?? closingLead.Observacao ?? '',
-                    Responsavel: '', // Responsavel sem preenchimento
+                    Responsavel: closingLead.responsavel ?? closingLead.Responsavel ?? '', // Responsavel preenchido
                     Data: closingLead.Data ?? formatDDMMYYYYFromISO(closingLead.createdAt) ?? '',
                     createdAt: closingLead.createdAt ?? null,
                     closedAt: serverTimestamp(),
-                    registeredAt: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString(), // Data atual + 1 ano
+                    registeredAt: serverTimestamp(), // Data atual
                 };
                 await setDoc(newRenovDocRef, renovPayload);
             } catch (errRenov) {
-                console.error('Erro ao gravar em renovacoes:', errRenov);
+                console.error('Erro ao gravar em renovados:', errRenov);
                 // não interrompe o fluxo principal; só registra o erro
             }
-            // --- FIM gravação em renovacoes ---
+            // --- FIM gravação em renovados ---
 
             // Atualiza lead original: status, closedAt e campos de venda/nome
             const originalRef = doc(db, 'renovacoes', leadId);
