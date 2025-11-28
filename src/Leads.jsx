@@ -833,6 +833,9 @@ const Leads = ({
       // --- NOVO: grava também em 'renovacoes' (mesmo payload, mesmo doc id) ---
       try {
         const renovRef = doc(db, 'renovacoes', leadId);
+        const now = new Date();
+        const registeredAtOneYearLater = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
+
         const renovPayload = {
           ID: closingLead.ID ?? closingLead.id ?? leadId,
           id: leadId,
@@ -857,8 +860,8 @@ const Leads = ({
           Responsavel: '', // Responsavel sem preenchimento
           Data: closingLead.Data ?? formatDDMMYYYYFromISO(closingLead.createdAt) ?? '',
           createdAt: closingLead.createdAt ?? null,
-          closedAt: formatDDMMYYYYHHMM(new Date()), // Formatado
-          registeredAt: formatDDMMYYYY(new Date()), // Formatado para data atual
+          closedAt: formatDDMMYYYYHHMM(now), // Formatado
+          registeredAt: formatDDMMYYYY(registeredAtOneYearLater), // Formatado para data atual + 1 ano
         };
         await setDoc(renovRef, renovPayload);
       } catch (errRenov) {
