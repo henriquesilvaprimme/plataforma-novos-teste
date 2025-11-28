@@ -9,7 +9,7 @@ import { collection, getDocs, onSnapshot, query, orderBy, where, Timestamp } fro
 
 const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdateDetalhes, isAdmin, scrollContainerRef }) => {
     // --- ESTADOS ---
-    const [allRenovados, setAllRenovados] = useState([]); // AJUSTE AQUI: Novo estado para armazenar TODOS os renovados
+    const [allRenovados, setAllRenovados] = useState([]); // Novo estado para armazenar TODOS os renovados
     const [renovadosFiltradosInterno, setRenovadosFiltradosInterno] = useState([]);
     const [paginaAtual, setPaginaAtual] = useState(1);
     const leadsPorPagina = 10;
@@ -100,7 +100,7 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
     };
 
     // --- FUNÇÃO PARA BUSCAR TODOS OS LEADS RENOVADOS COM STATUS 'FECHADO' DO FIRESTORE ---
-    const fetchAllRenovadosFromFirebase = async () => { // AJUSTE AQUI: Nova função para buscar TUDO
+    const fetchAllRenovadosFromFirebase = async () => {
         setIsLoading(true);
         try {
             const q = query(
@@ -123,18 +123,18 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
     };
 
     const handleRefresh = async () => {
-        await fetchAllRenovadosFromFirebase(); // AJUSTE AQUI: Chama a nova função de busca
+        await fetchAllRenovadosFromFirebase(); // Chama a nova função de busca
     };
 
     // --- EFEITO DE CARREGAMENTO INICIAL ---
     useEffect(() => {
-        fetchAllRenovadosFromFirebase(); // AJUSTE AQUI: Carrega todos os renovados na montagem
+        fetchAllRenovadosFromFirebase(); // Carrega todos os renovados na montagem
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []); // Sem dependências para rodar apenas uma vez na montagem
 
     // --- EFEITO DE FILTRAGEM E SINCRONIZAÇÃO DE ESTADOS (AGORA COM FILTRAGEM LOCAL) ---
     useEffect(() => {
-        let renovadosParaFiltrar = [...allRenovados]; // AJUSTE AQUI: Começa com TODOS os renovados
+        let renovadosParaFiltrar = [...allRenovados]; // Começa com TODOS os renovados
 
         // 1. Filtragem por Data (Local)
         if (filtroData) {
@@ -176,7 +176,8 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
         // --------------------------------------------------------------------------------
         setValores(prevValores => {
             const novosValores = { ...prevValores };
-            renovadosOrdenados.forEach(lead => { // AJUSTE AQUI: Usa renovadosOrdenados para sincronizar
+            renovadosOrdenados.forEach(lead => {
+                // AJUSTE AQUI: Garantindo que PremioLiquido seja um número para cálculo
                 const rawPremioFromApi = String(lead.PremioLiquido || '');
                 const premioFromApi = parseFloat(rawPremioFromApi.replace('.', '').replace(',', '.'));
                 const premioInCents = isNaN(premioFromApi) || rawPremioFromApi === '' ? null : Math.round(premioFromApi * 100);
@@ -210,7 +211,7 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
         // SINCRONIZAÇÃO NOVOS ESTADOS: Meio de Pagamento
         setMeioPagamento(prevMeioPagamento => {
             const novosMeios = { ...prevMeioPagamento };
-            renovadosOrdenados.forEach(lead => { // AJUSTE AQUI: Usa renovadosOrdenados para sincronizar
+            renovadosOrdenados.forEach(lead => {
                 const apiMeioPagamento = lead.MeioPagamento || '';
                 if (!novosMeios[lead.id] || (apiMeioPagamento !== '' && prevMeioPagamento[lead.id] === undefined)) {
                     novosMeios[lead.id] = apiMeioPagamento;
@@ -222,7 +223,7 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
         // SINCRONIZAÇÃO NOVOS ESTADOS: Cartão Porto Seguro novo
         setCartaoPortoNovo(prevCartaoPortoNovo => {
             const novosCartoes = { ...prevCartaoPortoNovo };
-            renovadosOrdenados.forEach(lead => { // AJUSTE AQUI: Usa renovadosOrdenados para sincronizar
+            renovadosOrdenados.forEach(lead => {
                 const apiCartaoPortoNovo = lead.CartaoPortoNovo || '';
                 if (!novosCartoes[lead.id] || (apiCartaoPortoNovo !== '' && prevCartaoPortoNovo[lead.id] === undefined)) {
                     novosCartoes[lead.id] = apiCartaoPortoNovo;
@@ -234,7 +235,7 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
         // Sincronização de estados (Display e Vigência) - Mantida
         setPremioLiquidoInputDisplay(prevDisplay => {
             const newDisplay = { ...prevDisplay };
-            renovadosOrdenados.forEach(lead => { // AJUSTE AQUI: Usa renovadosOrdenados para sincronizar
+            renovadosOrdenados.forEach(lead => {
                 const currentPremio = String(lead.PremioLiquido || '');
                 if (currentPremio !== '') {
                     const premioFloat = parseFloat(currentPremio.replace(',', '.'));
@@ -248,9 +249,10 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
 
         setVigencia(prevVigencia => {
             const novasVigencias = { ...prevVigencia };
-            renovadosOrdenados.forEach(lead => { // AJUSTE AQUI: Usa renovadosOrdenados para sincronizar
-                const vigenciaInicioStrApi = String(lead.VigenciaInicial || '');
-                const vigenciaFinalStrApi = String(lead.VigenciaFinal || '');
+            renovadosOrdenados.forEach(lead => {
+                // AJUSTE AQUI: Garantindo que VigenciaInicial e VigenciaFinal sejam strings no formato YYYY-MM-DD
+                const vigenciaInicioStrApi = lead.VigenciaInicial ? formatarDataParaInput(lead.VigenciaInicial) : '';
+                const vigenciaFinalStrApi = lead.VigenciaFinal ? formatarDataParaInput(lead.VigenciaFinal) : '';
 
                 if (!novasVigencias[lead.id] || (novasVigencias[lead.id].inicio === undefined && vigenciaInicioStrApi !== '') || (novasVigencias[lead.id].inicio !== vigenciaInicioStrApi && prevVigencia[lead.id]?.inicio === undefined)) {
                     novasVigencias[lead.id] = {
@@ -269,7 +271,7 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
         });
         // --------------------------------------------------------------------------------
 
-    }, [allRenovados, filtroNome, filtroData]); // AJUSTE AQUI: Dependências atualizadas para o novo fluxo de filtragem local
+    }, [allRenovados, filtroNome, filtroData]); // Dependências atualizadas para o novo fluxo de filtragem local
 
 
     // --- FUNÇÕES DE HANDLER (NOVAS E EXISTENTES) ---
@@ -278,6 +280,37 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
         if (valorCentavos === null || isNaN(valorCentavos)) return '';
         return (valorCentavos / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
+
+    // AJUSTE AQUI: Nova função para formatar datas para o input type="date" (YYYY-MM-DD)
+    const formatarDataParaInput = (data) => {
+        if (!data) return '';
+        let dateObj;
+        if (data instanceof Timestamp) {
+            dateObj = data.toDate();
+        } else if (typeof data === 'string') {
+            // Tenta parsear DD/MM/AAAA ou YYYY-MM-DD
+            const parts = data.split('/');
+            if (parts.length === 3) { // DD/MM/AAAA
+                dateObj = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+            } else if (data.match(/^\d{4}-\d{2}-\d{2}$/)) { // YYYY-MM-DD
+                dateObj = new Date(data + 'T00:00:00'); // Adiciona T00:00:00 para evitar problemas de fuso horário
+            } else {
+                return '';
+            }
+        } else if (data instanceof Date) {
+            dateObj = data;
+        } else {
+            return '';
+        }
+
+        if (isNaN(dateObj.getTime())) return '';
+
+        const year = dateObj.getFullYear();
+        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const day = String(dateObj.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
 
     const handlePremioLiquidoChange = (id, valor) => {
         let cleanedValue = valor.replace(/[^\d,\.]/g, '');
@@ -578,10 +611,11 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
                                     <h3 className="text-xl font-bold text-gray-900 mb-2">{lead.name}</h3>
                                     
                                     <div className="space-y-1 text-sm text-gray-700">
-                                        <p><strong>Modelo:</strong> {lead.vehicleModel}</p>
-                                        <p><strong>Ano/Modelo:</strong> {lead.vehicleYearModel}</p>
-                                        <p><strong>Cidade:</strong> {lead.city}</p>
-                                        <p><strong>Telefone:</strong> {lead.phone}</p>
+                                        {/* AJUSTE AQUI: Exibindo os campos solicitados */}
+                                        <p><strong>Modelo:</strong> {lead.Modelo || 'N/A'}</p>
+                                        <p><strong>Ano/Modelo:</strong> {lead.AnoModelo || 'N/A'}</p>
+                                        <p><strong>Cidade:</strong> {lead.Cidade || 'N/A'}</p>
+                                        <p><strong>Telefone:</strong> {lead.Telefone || 'N/A'}</p>
                                     </div>
 
                                     {responsavel && isAdmin && (
@@ -761,7 +795,7 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
                                                     cartaoPortoNovo[`${lead.id}`] 
                                                 );
                                                 // Note: Esta chamada é crucial para o seu fluxo de atualização pós-confirmação
-                                                await fetchAllRenovadosFromFirebase(); // AJUSTE AQUI: Atualiza a lista após a confirmação
+                                                await fetchAllRenovadosFromFirebase(); // Atualiza a lista após a confirmação
                                             }}
                                             disabled={isButtonDisabled || isLoading}
                                             className={`flex items-center justify-center w-full px-4 py-3 text-lg font-semibold rounded-lg shadow-md transition duration-200 ${
