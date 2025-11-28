@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import LeadRenovacoes from './components/LeadRenovacoes'; // Corrigido para LeadRenovacoes
+import LeadRenovacoes from './components/LeadRenovacoes';
 import { RefreshCcw, Bell, Search, Send, Edit, Save, User, ChevronLeft, ChevronRight } from 'lucide-react';
 import { collection, onSnapshot, doc, updateDoc, query, orderBy } from 'firebase/firestore';
 import { db } from './firebase'; // ajuste o caminho se necessário
@@ -84,8 +84,14 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
     const [isLoading, setIsLoading] = useState(false);
     const [observacoes, setObservacoes] = useState({});
     const [isEditingObservacao, setIsEditingObservacao] = useState({});
-    const [dataInput, setDataInput] = useState('');
-    const [filtroData, setFiltroData] = useState('');
+    
+    // --- MODIFICAÇÃO AQUI: Inicializa dataInput e filtroData com o mês e ano atuais ---
+    const today = new Date();
+    const currentYearMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const [dataInput, setDataInput] = useState(currentYearMonth);
+    const [filtroData, setFiltroData] = useState(currentYearMonth);
+    // --- FIM DA MODIFICAÇÃO ---
+
     const [nomeInput, setNomeInput] = useState('');
     const [filtroNome, setFiltroNome] = useState('');
     const [filtroStatus, setFiltroStatus] = useState('Todos');
