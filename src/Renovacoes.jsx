@@ -1048,8 +1048,8 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
                                 <label className="block text-sm font-medium text-gray-700">Meio de Pagamento</label>
                                 <select value={modalMeioPagamento} onChange={(e) => setModalMeioPagamento(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm">
                                     <option value="">Selecione</option>
-                                    <option value="CP">CP</option>
-                                    <option value="CC">CC</option>
+                                    <option value="CP">Cartão de Crédito Porto</option>
+                                    <option value="CC">Cartão de Crédito</option>
                                     <option value="Debito">Débito</option>
                                     <option value="Boleto">Boleto</option>
                                 </select>
@@ -1081,11 +1081,15 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Vigência Inicial</label>
-                                <input type="date" value={modalVigenciaInicial} onChange={(e) => setModalVigenciaInicial(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm" />
+                                <input type="date" value={modalVigenciaInicial} onChange={(e) => {
+                                    setModalVigenciaInicial(e.target.value);
+                                    const newVigenciaInicial = new Date(`${e.target.value}T00:00:00`);
+                                    setModalVigenciaFinal(toDateInputValue(addOneYearToDate(newVigenciaInicial)));
+                                }} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm" />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Vigência Final</label>
-                                <input type="date" value={modalVigenciaFinal} onChange={(e) => setModalVigenciaFinal(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm" />
+                                <input type="date" value={modalVigenciaFinal} readOnly className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 cursor-not-allowed" />
                             </div>
                         </div>
 
@@ -1094,7 +1098,7 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
                                 Cancelar
                             </button>
                             <button onClick={handleConcluirVenda} disabled={isSubmittingClose} className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition duration-150 disabled:opacity-50">
-                                {isSubmittingClose ? 'Concluindo...' : 'Concluir Venda'}
+                                {isSubmittingClose ? 'Concluíndo...' : 'Concluir Venda'}
                             </button>
                         </div>
                     </div>
