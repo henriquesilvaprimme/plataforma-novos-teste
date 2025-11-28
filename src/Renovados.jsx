@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { RefreshCcw, Search, ChevronLeft, ChevronRight, CheckCircle, DollarSign, Calendar } from 'lucide-react';
 import { db } from './firebase'; // Importar o db do firebase
-import { collection, getDocs, onSnapshot, query, orderBy } from 'firebase/firestore'; // Importar funções do firestore
+import { collection, getDocs, onSnapshot, query, orderBy, where, Timestamp } from 'firebase/firestore'; // Importar funções do firestore
 
 // ===============================================
 // 1. COMPONENTE PRINCIPAL: Renovados
@@ -112,7 +112,21 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
     const fetchRenovadosFromFirebase = async () => {
         setIsLoading(true);
         try {
-            const q = query(collection(db, 'renovados'), orderBy('createdAt', 'desc'));
+            let q = query(collection(db, 'renovados'), orderBy('registeredAt', 'desc')); // Alterado para orderBy('registeredAt', 'desc')
+
+            if (filtroData) {
+                const [year, month] = filtroData.split('-').map(Number);
+                const startDate = new Date(year, month - 1, 1);
+                const endDate = new Date(year, month, 0, 23, 59, 59, 999); // Último milissegundo do mês
+
+                q = query(
+                    collection(db, 'renovados'),
+                    where('registeredAt', '>=', Timestamp.fromDate(startDate)),
+                    where('registeredAt', '<=', Timestamp.fromDate(endDate)),
+                    orderBy('registeredAt', 'desc') // Mantém a ordenação por registeredAt
+                );
+            }
+
             const querySnapshot = await getDocs(q);
             const renovadosData = querySnapshot.docs.map(doc => ({
                 id: doc.id,
@@ -134,7 +148,7 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
     useEffect(() => {
         fetchRenovadosFromFirebase();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [filtroData]); // Adicionado filtroData como dependência para re-executar o useEffect quando o filtro mudar
     
     // --- EFEITO DE FILTRAGEM E SINCRONIZAÇÃO DE ESTADOS ---
     useEffect(() => {
@@ -252,23 +266,13 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
             leadsFiltrados = renovadosOrdenados.filter(lead =>
                 nomeContemFiltro(lead.name, filtroNome)
             );
-        } else if (filtroData) {
-            leadsFiltrados = renovadosOrdenados.filter(lead => {
-                // 1. Converte a data do lead para AAAA-MM-DD usando a função IMUNE A NEW DATE()
-                const dataLeadFormatada = getDataParaComparacao(lead.Data);
-                
-                // 2. Extrai AAAA-MM para comparação (ex: '2025-10-01' -> '2025-10')
-                const dataLeadMesAno = dataLeadFormatada ? dataLeadFormatada.substring(0, 7) : '';
-                
-                // 3. Compara o AAAA-MM do lead com o AAAA-MM do filtro ('2025-10' === '2025-10')
-                return dataLeadMesAno === filtroData;
-            });
         } else {
             leadsFiltrados = renovadosOrdenados;
         }
 
         setRenovadosFiltradosInterno(leadsFiltrados);
-    }, [leads, filtroNome, filtroData]);
+    }, [leads, filtroNome, renovadosFiltradosInterno]); // Removido filtroData das dependências, pois já é tratado no useEffect
+    // O `renovadosFiltradosInterno` foi adicionado como dependência para que o filtro de nome seja aplicado sobre os dados já filtrados por data.
 
 
     // --- FUNÇÕES DE HANDLER (NOVAS E EXISTENTES) ---
@@ -326,7 +330,7 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
     // FUNÇÃO ATUALIZADA: Limpa o '%' para a lógica interna e extrai o valor float para a API.
     const handleComissaoChange = (id, valor) => {
         // 1. Remove o '%' e limpa caracteres não numéricos ou a vírgula/ponto
-        let cleanedValue = valor.toString().replace(/%/g, '').replace(/[^\d,]/g, '');
+        let cleanedValue = valor.replace(/%/g, '').replace(/[^\d,]/g, '');
 
         // 2. Garante apenas uma vírgula para separar decimais e máximo de duas casas
         const parts = cleanedValue.split(',');
