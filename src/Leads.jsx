@@ -816,7 +816,7 @@ const Leads = ({
           Cidade: closingLead.Cidade ?? closingLead.city ?? '',
           Telefone: closingLead.Telefone ?? closingLead.phone ?? '',
           TipoSeguro: closingLead.TipoSeguro ?? closingLead.insuranceType ?? '',
-          usuarioId: closingLead.usuarioId ?? null,
+          usuarioId: null, // Responsavel sem preenchimento
           Seguradora: modalSeguradora || '',
           MeioPagamento: modalMeioPagamento || '',
           CartaoPortoNovo: modalMeioPagamento === 'CP' ? (modalCartaoPortoNovo || 'Não') : '',
@@ -825,9 +825,9 @@ const Leads = ({
           Parcelamento: modalParcelamento || '',
           VigenciaInicial: vigIniISO || '',
           VigenciaFinal: vigFinISO || '',
-          Status: 'Fechado',
+          Status: '', // Status sem preenchimento
           Observacao: closingLead.observacao ?? closingLead.Observacao ?? '',
-          Responsavel: closingLead.responsavel ?? closingLead.Responsavel ?? usuarioLogado?.nome ?? '',
+          Responsavel: '', // Responsavel sem preenchimento
           Data: closingLead.Data ?? formatDDMMYYYYFromISO(closingLead.createdAt) ?? '',
           createdAt: closingLead.createdAt ?? null,
           closedAt: serverTimestamp(),
@@ -1143,7 +1143,7 @@ const Leads = ({
                                   onClick={() => handleAlterar(lead.id)}
                                   className="px-3 py-1 bg-yellow-400 text-gray-900 text-sm rounded-md hover:bg-yellow-500 transition duration-150 shadow-sm"
                                 >
-                                  Alterar
+                                  Mudar Atribuição
                                 </button>
                               )}
                             </div>
