@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import Lead from './components/LeadRenovacao';
+import Lead from './components/LeadRenovacoes';
 import { RefreshCcw, Bell, Search, Send, Edit, Save, User, ChevronLeft, ChevronRight } from 'lucide-react';
 import { collection, onSnapshot, doc, updateDoc, query, orderBy } from 'firebase/firestore';
 import { db } from './firebase'; // ajuste o caminho se necessário
@@ -115,14 +115,14 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
         return {
             id: String(docId),
             ID: data.ID ?? data.id ?? docId,
-            Nome: safe(data.Nome) || safe(data.name) || '',
-            Modelo: safe(data.Modelo) || safe(data.vehicleModel) || '',
-            AnoModelo: safe(data.AnoModelo) || safe(data.vehicleYearModel) || '',
-            Cidade: safe(data.Cidade) || safe(data.city) || '',
-            Telefone: safe(data.Telefone) || safe(data.phone) || '',
-            TipoSeguro: safe(data.TipoSeguro) || safe(data.insuranceType) || '',
+            Nome: safe(data.Nome) || '',
+            Modelo: safe(data.Modelo) || '',
+            AnoModelo: safe(data.AnoModelo) || '',
+            Cidade: safe(data.Cidade) || '',
+            Telefone: safe(data.Telefone) || '',
+            TipoSeguro: safe(data.TipoSeguro) || '',
             status: typeof data.Status === 'string' ? data.Status : data.status ?? '',
-            Seguradora: safe(data.Seguradora) || safe(data.insurer) || '',
+            Seguradora: safe(data.Seguradora) || '',
             MeioPagamento: safe(data.MeioPagamento) || '',
             CartaoPortoNovo: safe(data.CartaoPortoNovo) || '',
             PremioLiquido: safe(data.PremioLiquido) || '',
