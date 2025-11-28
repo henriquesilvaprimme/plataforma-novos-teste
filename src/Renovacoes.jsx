@@ -176,19 +176,6 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
     const normalizeLead = (docId, data = {}) => {
         const safe = (v) => (v === undefined || v === null ? '' : v);
 
-        const toISO = (v) => {
-            if (!v && v !== 0) return '';
-            if (typeof v === 'object' && typeof v.toDate === 'function') {
-                return v.toDate().toISOString();
-            }
-            if (typeof v === 'string') return v;
-            try {
-                return new Date(v).toISOString();
-            } catch {
-                return '';
-            }
-        };
-
         return {
             id: String(docId),
             ID: data.ID ?? data.id ?? docId,
@@ -198,7 +185,8 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
             Cidade: safe(data.Cidade) || '',
             Telefone: safe(data.Telefone) || '',
             TipoSeguro: safe(data.TipoSeguro) || '',
-            status: typeof data.Status === 'string' ? data.Status : data.status ?? '',
+            // AJUSTE CRÍTICO AQUI: Unificando o campo status
+            status: safe(data.Status) || safe(data.status) || '',
             Seguradora: safe(data.Seguradora) || '',
             MeioPagamento: safe(data.MeioPagamento) || '',
             CartaoPortoNovo: safe(data.CartaoPortoNovo) || '',
@@ -209,17 +197,11 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
             VigenciaFinal: data.VigenciaFinal,     // Mantém como está para ser formatado na exibição
             createdAt: data.createdAt,
             registeredAt: data.registeredAt, // Mantém como está para ser formatado na exibição
+            // AJUSTE CRÍTICO AQUI: Unificando o campo responsavel
             responsavel: safe(data.Responsavel) || safe(data.responsavel) || '',
             observacao: safe(data.Observacao) || safe(data.observacao) || '',
             usuarioId: data.usuarioId !== undefined && data.usuarioId !== null ? Number(data.usuarioId) : data.usuarioId ?? null,
             closedAt: data.closedAt, // Mantém como está para ser formatado na exibição
-            // Campos de fechamento
-            Seguradora: safe(data.Seguradora) || '',
-            MeioPagamento: safe(data.MeioPagamento) || '',
-            CartaoPortoNovo: safe(data.CartaoPortoNovo) || '',
-            PremioLiquido: safe(data.PremioLiquido) || '',
-            Comissao: safe(data.Comissao) || '',
-            Parcelamento: safe(data.Parcelamento) || '',
             ...data, // Mantém demais campos brutos se houver necessidade
         };
     };
@@ -746,9 +728,9 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
             // Atualiza lead original: status, closedAt e campos de venda/nome
             const originalRef = doc(db, 'renovacoes', leadId);
             const updatePayload = {
-                // AJUSTE AQUI: Status e Responsavel devem ser vazios
+                // AJUSTE CRÍTICO AQUI: Status e Responsavel devem ser vazios
                 status: '', // Status vazio
-                Responsavel: '', // Responsavel vazio
+                responsavel: '', // Responsavel vazio (usando o campo unificado)
                 closedAt: formatDDMMYYYYHHMM(closedAtDate),
                 Seguradora: modalSeguradora || '',
                 PremioLiquido: modalPremioLiquido || '',
