@@ -50,6 +50,19 @@ const Sidebar = ({ nomeUsuario }) => {
           Renovações
         </NavLink>
 
+        {/* NOVO: Link para Renovados */}
+        <NavLink
+          to="/renovados"
+          className={({ isActive }) =>
+            `flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-blue-100 transition ${
+              isActive ? 'border-l-4 border-blue-500 bg-blue-50' : ''
+            }`
+          }
+        >
+          <Repeat size={20} /> {/* Você pode querer um ícone diferente aqui */}
+          Renovados
+        </NavLink>
+
         {/* NOVO: Link para Segurados */}
         <NavLink
           to="/segurados"
