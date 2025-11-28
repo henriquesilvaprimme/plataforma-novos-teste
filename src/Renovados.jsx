@@ -36,58 +36,19 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
     // --- FUNÇÕES DE LÓGICA (CORRIGIDA) ---
     
     /**
-     * GARANTIA DE FORMATO: Converte DD/MM/AAAA para AAAA-MM-DD sem depender de new Date().
-     * ESSA CORREÇÃO GARANTE QUE O DIA 01 NÃO É INTERPRETADO ERRADO.
-     * @param {string} dataStr - Data de entrada (espera DD/MM/AAAA)
-     * @returns {string} Data formatada (AAAA-MM-DD)
+     * AJUSTE AQUI: Função unificada para parsear registeredAt para um objeto Date.
+     * Lida com Timestamp e string DD/MM/AAAA.
+     * @param {Timestamp|string} registeredAtValue - Valor do campo registeredAt
+     * @returns {Date|null} Objeto Date ou null se não puder ser parseado
      */
-    const getDataParaComparacao = (dataStr) => {
-        if (!dataStr) return '';
-        dataStr = String(dataStr).trim();
-
-        const parts = dataStr.split('/');
-        
-        // Trata o formato DD/MM/AAAA
-        if (parts.length === 3) {
-            const [dia, mes, ano] = parts;
-            // Verifica se são números e garante a padronização
-            if (!isNaN(parseInt(dia)) && !isNaN(parseInt(mes)) && !isNaN(parseInt(ano))) {
-                return `${ano}-${mes.padStart(2, '0')}-${dia.padStart(2, '0')}`;
-            }
-        }
-        
-        // Se já estiver em AAAA-MM-DD, retorna como está (para o caso de ser uma data de vigência)
-        if (/^\d{4}-\d{2}-\d{2}$/.test(dataStr)) {
-            return dataStr;
-        }
-
-        return ''; // Retorna vazio se não conseguir formatar
-    };
-
-    // NOVO: Função para parsear a string "28 de novembro de 2025 às 00:48:48 UTC-3" para um objeto Date
-    const parseRegisteredAtString = (registeredAtString) => {
-        if (!registeredAtString || typeof registeredAtString !== 'string') {
-            return null;
-        }
-
-        // Mapeamento de meses para números
-        const meses = {
-            'janeiro': 0, 'fevereiro': 1, 'março': 2, 'abril': 3, 'maio': 4, 'junho': 5,
-            'julho': 6, 'agosto': 7, 'setembro': 8, 'outubro': 9, 'novembro': 10, 'dezembro': 11
-        };
-
-        // Regex para extrair dia, mês (nome), ano, hora, minuto, segundo
-        const regex = /(\d{1,2}) de (\w+) de (\d{4}) às (\d{2}):(\d{2}):(\d{2}) UTC/;
-        const match = registeredAtString.match(regex);
-
-        if (match) {
-            const [, dia, mesNome, ano, hora, minuto, segundo] = match;
-            const mesNumero = meses[mesNome.toLowerCase()];
-
-            if (mesNumero !== undefined) {
-                // Cria a data no fuso horário local para evitar problemas de UTC
-                const date = new Date(parseInt(ano), mesNumero, parseInt(dia), parseInt(hora), parseInt(minuto), parseInt(segundo));
-                return date;
+    const parseRegisteredAtToDate = (registeredAtValue) => {
+        if (registeredAtValue instanceof Timestamp) {
+            return registeredAtValue.toDate();
+        } else if (typeof registeredAtValue === 'string') {
+            const parts = registeredAtValue.split('/');
+            if (parts.length === 3) {
+                // Date(ano, mes-1, dia) para evitar problemas de fuso horário e garantir o mês correto
+                return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
             }
         }
         return null;
@@ -144,22 +105,22 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
             let q;
             if (filtroData) {
                 const [year, month] = filtroData.split('-').map(Number);
+                // AJUSTE AQUI: Criando as datas de início e fim do mês para a consulta do Firestore
                 const startDate = new Date(year, month - 1, 1);
                 const endDate = new Date(year, month, 0, 23, 59, 59, 999); // Último milissegundo do mês
 
-                // Busca por 'registeredAt' e 'Status' na coleção 'renovados'
                 q = query(
-                    collection(db, 'renovados'), // Coleção corrigida
+                    collection(db, 'renovados'),
+                    where('Status', '==', 'Fechado'), // Filtro de Status
                     where('registeredAt', '>=', Timestamp.fromDate(startDate)),
                     where('registeredAt', '<=', Timestamp.fromDate(endDate)),
-                    where('Status', '==', 'Fechado'), // Adicionado filtro de Status
                     orderBy('registeredAt', 'desc')
                 );
             } else {
-                // Busca todos os renovados com Status 'Fechado' se não houver filtro de data
+                // Se não houver filtro de data, busca todos os "Fechado"
                 q = query(
-                    collection(db, 'renovados'), // Coleção corrigida
-                    where('Status', '==', 'Fechado'), // Adicionado filtro de Status
+                    collection(db, 'renovados'),
+                    where('Status', '==', 'Fechado'),
                     orderBy('registeredAt', 'desc')
                 );
             }
@@ -170,21 +131,12 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
                 ...doc.data()
             }));
 
-            // FILTRO LOCAL ADICIONAL para lidar com 'registeredAt' como string
+            // AJUSTE AQUI: Filtro local adicional para garantir que o registeredAt esteja no formato correto
+            // e para lidar com casos onde o Firestore não pode filtrar por string de data diretamente.
             if (filtroData) {
                 const [filterYear, filterMonth] = filtroData.split('-').map(Number);
                 renovadosData = renovadosData.filter(lead => {
-                    let registeredDate = null;
-                    if (lead.registeredAt instanceof Timestamp) {
-                        registeredDate = lead.registeredAt.toDate();
-                    } else if (typeof lead.registeredAt === 'string') {
-                        // O campo registeredAt na coleção renovados já está formatado como DD/MM/AAAA
-                        const parts = lead.registeredAt.split('/');
-                        if (parts.length === 3) {
-                            registeredDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-                        }
-                    }
-
+                    const registeredDate = parseRegisteredAtToDate(lead.registeredAt);
                     if (registeredDate) {
                         return registeredDate.getFullYear() === filterYear &&
                                registeredDate.getMonth() === (filterMonth - 1);
@@ -313,29 +265,10 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
         });
         // --------------------------------------------------------------------------------
 
-        // ORDENAÇÃO: Agora usa 'registeredAt' para ordenação, priorizando Timestamp e depois a string parseada
+        // AJUSTE AQUI: Usando a função unificada para parsear registeredAt para ordenação
         const renovadosOrdenados = [...renovadosAtuais].sort((a, b) => {
-            let dateA = null;
-            if (a.registeredAt instanceof Timestamp) {
-                dateA = a.registeredAt.toDate();
-            } else if (typeof a.registeredAt === 'string') {
-                // O campo registeredAt na coleção renovados já está formatado como DD/MM/AAAA
-                const parts = a.registeredAt.split('/');
-                if (parts.length === 3) {
-                    dateA = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-                }
-            }
-
-            let dateB = null;
-            if (b.registeredAt instanceof Timestamp) {
-                dateB = b.registeredAt.toDate();
-            } else if (typeof b.registeredAt === 'string') {
-                // O campo registeredAt na coleção renovados já está formatado como DD/MM/AAAA
-                const parts = b.registeredAt.split('/');
-                if (parts.length === 3) {
-                    dateB = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
-                }
-            }
+            const dateA = parseRegisteredAtToDate(a.registeredAt);
+            const dateB = parseRegisteredAtToDate(b.registeredAt);
 
             if (dateA && dateB) {
                 return dateB.getTime() - dateA.getTime();
@@ -639,7 +572,7 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
                         const requiresCartaoPortoNovo = seguradorasComCartaoPortoNovo.includes(currentInsurer) && currentMeioPagamento === 'CP';
 
                         // Condição de validação para Cartão Porto Novo
-                        const cartaoPortoNovoInvalido = requiresCartaoPortoNovo && (!cartaoPortoNovo[`${lead.id}`] || cartaoPortoNovo[`${lead.id}`] === '');
+                        const cartaoPortoNovoInvalido = requiresCartaoPortoNovo && (!cartaoPortoNovo[`${lead.id}`] || cartaoPortaoNovo[`${lead.id}`] === '');
                         
                         // Lógica de desativação do botão de confirmação
                         const isButtonDisabled =
