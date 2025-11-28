@@ -55,6 +55,40 @@ const formatDDMMYYYYFromISO = (isoOrString) => {
     }
 };
 
+// NOVA FUNÇÃO: Formata um objeto Date para "DD/MM/AAAA"
+const formatDDMMYYYY = (date) => {
+    if (!date) return '';
+    let d = date;
+    if (typeof date.toDate === 'function') { // Se for um Timestamp do Firebase
+        d = date.toDate();
+    } else if (!(date instanceof Date)) { // Se não for Date nem Timestamp, tenta converter
+        d = new Date(date);
+    }
+    if (isNaN(d.getTime())) return '';
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+};
+
+// NOVA FUNÇÃO: Formata um objeto Date para "DD/MM/AAAA HH:MM"
+const formatDDMMYYYYHHMM = (date) => {
+    if (!date) return '';
+    let d = date;
+    if (typeof date.toDate === 'function') { // Se for um Timestamp do Firebase
+        d = date.toDate();
+    } else if (!(date instanceof Date)) { // Se não for Date nem Timestamp, tenta converter
+        d = new Date(date);
+    }
+    if (isNaN(d.getTime())) return '';
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
+};
+
 
 // ===============================================
 // COMPONENTE AUXILIAR: StatusButton com Contagem
@@ -171,14 +205,14 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
             PremioLiquido: safe(data.PremioLiquido) || '',
             Comissao: safe(data.Comissao) || '',
             Parcelamento: safe(data.Parcelamento) || '',
-            VigenciaInicial: toISO(data.VigenciaInicial),
-            VigenciaFinal: toISO(data.VigenciaFinal),
-            createdAt: toISO(data.createdAt),
-            registeredAt: toISO(data.registeredAt), // Adicionado registeredAt
+            VigenciaInicial: data.VigenciaInicial, // Mantém como está para ser formatado na exibição
+            VigenciaFinal: data.VigenciaFinal,     // Mantém como está para ser formatado na exibição
+            createdAt: data.createdAt,
+            registeredAt: data.registeredAt, // Mantém como está para ser formatado na exibição
             responsavel: safe(data.Responsavel) || safe(data.responsavel) || '',
             observacao: safe(data.Observacao) || safe(data.observacao) || '',
             usuarioId: data.usuarioId !== undefined && data.usuarioId !== null ? Number(data.usuarioId) : data.usuarioId ?? null,
-            closedAt: toISO(data.closedAt), // Adicionado closedAt
+            closedAt: data.closedAt, // Mantém como está para ser formatado na exibição
             // Campos de fechamento
             Seguradora: safe(data.Seguradora) || '',
             MeioPagamento: safe(data.MeioPagamento) || '',
@@ -394,8 +428,6 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
 
             if (lead.status === 'Em Contato') {
                 counts['Em Contato']++;
-            } else if (lead.status === 'Sem Contato') {
-                counts['Sem Contato']++;
             } else if (lead.status.startsWith('Agendado')) {
                        const statusDateStr = lead.status.split(' - ')[1];
                        if (!statusDateStr) return;
@@ -512,9 +544,8 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
 
     // --- Outras Funções (Mantidas) ---
 
-    const formatarData = (dataStr) => {
-        const data = parseDateToDateObject(dataStr);
-        return data ? data.toLocaleDateString('pt-BR') : '';
+    const formatarData = (data) => {
+        return formatDDMMYYYY(data);
     };
 
     const handleObservacaoChange = (leadId, text) => {
@@ -666,9 +697,11 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
 
         try {
             const leadId = String(closingLead.id);
-            // Converte datas do input para ISO strings
-            const vigIniISO = modalVigenciaInicial ? new Date(`${modalVigenciaInicial}T00:00:00`).toISOString() : '';
-            const vigFinISO = modalVigenciaFinal ? new Date(`${modalVigenciaFinal}T00:00:00`).toISOString() : '';
+            // Converte datas do input para objetos Date para formatação
+            const vigenciaInicialDate = modalVigenciaInicial ? new Date(`${modalVigenciaInicial}T00:00:00`) : null;
+            const vigenciaFinalDate = modalVigenciaFinal ? new Date(`${modalVigenciaFinal}T00:00:00`) : null;
+            const closedAtDate = new Date(); // Data e hora atuais para closedAt
+            const registeredAtDate = new Date(); // Data e hora atuais para registeredAt
 
             // --- NOVO: grava também em 'renovados' (mesmo payload, mas com novo ID) ---
             try {
@@ -693,15 +726,15 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
                     PremioLiquido: modalPremioLiquido || '',
                     Comissao: modalComissao || '',
                     Parcelamento: modalParcelamento || '',
-                    VigenciaInicial: vigIniISO || '',
-                    VigenciaFinal: vigFinISO || '',
+                    VigenciaInicial: formatDDMMYYYY(vigenciaInicialDate),
+                    VigenciaFinal: formatDDMMYYYY(vigenciaFinalDate),
                     Status: 'Fechado', // Status preenchido como Fechado
                     Observacao: closingLead.observacao ?? closingLead.Observacao ?? '',
                     Responsavel: closingLead.responsavel ?? closingLead.Responsavel ?? '', // Responsavel preenchido
-                    Data: closingLead.Data ?? formatDDMMYYYYFromISO(closingLead.createdAt) ?? '',
-                    createdAt: closingLead.createdAt ?? null,
-                    closedAt: serverTimestamp(),
-                    registeredAt: serverTimestamp(), // Data atual
+                    Data: closingLead.Data ?? formatDDMMYYYY(closingLead.createdAt) ?? '',
+                    createdAt: closingLead.createdAt ?? null, // Mantém o original ou null
+                    closedAt: formatDDMMYYYYHHMM(closedAtDate),
+                    registeredAt: formatDDMMYYYY(registeredAtDate), // Data atual formatada
                 };
                 await setDoc(newRenovDocRef, renovPayload);
             } catch (errRenov) {
@@ -714,15 +747,15 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
             const originalRef = doc(db, 'renovacoes', leadId);
             const updatePayload = {
                 status: 'Fechado',
-                closedAt: serverTimestamp(),
+                closedAt: formatDDMMYYYYHHMM(closedAtDate),
                 Seguradora: modalSeguradora || '',
                 PremioLiquido: modalPremioLiquido || '',
                 Comissao: modalComissao || '',
                 Parcelamento: modalParcelamento || '',
                 MeioPagamento: modalMeioPagamento || '',
                 CartaoPortoNovo: modalMeioPagamento === 'CP' ? (modalCartaoPortoNovo || 'Não') : '',
-                VigenciaInicial: vigIniISO || '',
-                VigenciaFinal: vigFinISO || '',
+                VigenciaInicial: formatDDMMYYYY(vigenciaInicialDate),
+                VigenciaFinal: formatDDMMYYYY(vigenciaFinalDate),
                 Nome: modalNome,
                 name: modalNome,
                 insurerConfirmed: true, // Marca como confirmado para exibir o layout de fechado
@@ -741,8 +774,8 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
             //             Parcelamento: modalParcelamento || '',
             //             MeioPagamento: modalMeioPagamento || '',
             //             CartaoPortoNovo: modalMeioPagamento === 'CP' ? (modalCartaoPortoNovo || 'Não') : '',
-            //             VigenciaInicial: vigIniISO || '',
-            //             VigenciaFinal: vigFinISO || '',
+            //             VigenciaInicial: formatDDMMYYYY(vigenciaInicialDate),
+            //             VigenciaFinal: formatDDMMYYYY(vigenciaFinalDate),
             //             Nome: modalNome,
             //             insurerConfirmed: true,
             //         },
