@@ -746,7 +746,9 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
             // Atualiza lead original: status, closedAt e campos de venda/nome
             const originalRef = doc(db, 'renovacoes', leadId);
             const updatePayload = {
-                status: 'Fechado',
+                // AJUSTE AQUI: Status e Responsavel devem ser vazios
+                status: '', // Status vazio
+                Responsavel: '', // Responsavel vazio
                 closedAt: formatDDMMYYYYHHMM(closedAtDate),
                 Seguradora: modalSeguradora || '',
                 PremioLiquido: modalPremioLiquido || '',
