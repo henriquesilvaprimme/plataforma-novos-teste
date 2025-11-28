@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import LeadRenovacoes from './components/LeadRenovacoes';
-import { RefreshCcw, Bell, Search, Send, Edit, Save, User, ChevronLeft, ChevronRight } from 'lucide-react';
+import { RefreshCcw, Bell, Search, Send, Edit, Save, User, ChevronLeft, ChevronRight, CheckCircle, DollarSign, Calendar } from 'lucide-react';
 import { collection, onSnapshot, doc, updateDoc, query, orderBy } from 'firebase/firestore';
 import { db } from './firebase'; // ajuste o caminho se necessário
 
@@ -98,6 +98,22 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
     const [hasScheduledToday, setHasScheduledToday] = useState(false);
     const [showNotification, setShowNotification] = useState(false);
     
+    // NOVOS STATES: modal de fechamento
+    const [isClosingModalOpen, setIsClosingModalOpen] = useState(false);
+    const [closingLead, setClosingLead] = useState(null);
+
+    // campos do modal
+    const [modalNome, setModalNome] = useState('');
+    const [modalSeguradora, setModalSeguradora] = useState('');
+    const [modalMeioPagamento, setModalMeioPagamento] = useState('');
+    const [modalCartaoPortoNovo, setModalCartaoPortoNovo] = useState('Não'); // 'Sim' | 'Não'
+    const [modalPremioLiquido, setModalPremioLiquido] = useState('');
+    const [modalComissao, setModalComissao] = useState('');
+    const [modalParcelamento, setModalParcelamento] = useState('1');
+    const [modalVigenciaInicial, setModalVigenciaInicial] = useState('');
+    const [modalVigenciaFinal, setModalVigenciaFinal] = useState('');
+    const [isSubmittingClose, setIsSubmittingClose] = useState(false);
+    
     // NOVO ESTADO: Armazena o responsável recém-atribuído localmente (Lógica Otimista)
     const [responsavelLocal, setResponsavelLocal] = useState({});
 
@@ -141,6 +157,14 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
             responsavel: safe(data.Responsavel) || safe(data.responsavel) || '',
             observacao: safe(data.Observacao) || safe(data.observacao) || '',
             usuarioId: data.usuarioId !== undefined && data.usuarioId !== null ? Number(data.usuarioId) : data.usuarioId ?? null,
+            closedAt: toISO(data.closedAt), // Adicionado closedAt
+            // Campos de fechamento
+            Seguradora: safe(data.Seguradora) || '',
+            MeioPagamento: safe(data.MeioPagamento) || '',
+            CartaoPortoNovo: safe(data.CartaoPortoNovo) || '',
+            PremioLiquido: safe(data.PremioLiquido) || '',
+            Comissao: safe(data.Comissao) || '',
+            Parcelamento: safe(data.Parcelamento) || '',
             ...data, // Mantém demais campos brutos se houver necessidade
         };
     };
@@ -502,6 +526,17 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
     };
 
     const handleConfirmStatus = async (leadId, novoStatus, phone) => {
+        // Se for Fechado -> abrir modal de fechamento
+        if (novoStatus === 'Fechado') {
+            const lead = leadsData.find((l) => String(l.id) === String(leadId));
+            if (!lead) {
+                alert('Lead não encontrada para fechamento.');
+                return;
+            }
+            openClosingModal(lead);
+            return;
+        }
+
         // onUpdateStatus é uma prop, se ela existir, a lógica de atualização de status
         // no componente pai (Leads.jsx) será chamada.
         // Para renovações, a atualização de status pode ser diferente ou não existir.
@@ -534,6 +569,177 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
     const getFullStatus = (status) => {
         return status || 'Novo';
     }
+
+    // ---------------- Modal: funções auxiliares ----------------
+    const toDateInputValue = (date = new Date()) => {
+        const d = new Date(date);
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const yyyy = d.getFullYear();
+        return `${yyyy}-${mm}-${dd}`; // formato para <input type="date">
+    };
+
+    const addOneYearToDate = (date) => {
+        const d = new Date(date);
+        d.setFullYear(d.getFullYear() + 1);
+        return d;
+    };
+
+    // Formatação de moeda para input: aceita digitação de números e formatado como R$
+    const formatCurrencyFromDigits = (digits) => {
+        if (!digits) return '';
+        const int = parseInt(digits, 10);
+        if (isNaN(int)) return '';
+        const value = int / 100;
+        return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    };
+
+    const extractDigits = (str = '') => (str ? String(str).replace(/\D/g, '') : '');
+
+    const handlePremioChange = (e) => {
+        const raw = e.target.value;
+        // permitimos que o usuário cole ou digite já formatado; extraímos dígitos e formatamos
+        const digits = extractDigits(raw);
+        const formatted = digits ? formatCurrencyFromDigits(digits) : '';
+        setModalPremioLiquido(formatted);
+    };
+
+    // Comissão: mantemos número inteiro e adicionamos '%'
+    const handleComissaoChange = (e) => {
+        const raw = e.target.value;
+        const digits = extractDigits(raw).slice(0, 3); // até 3 dígitos (ex: 100%)
+        if (!digits) {
+            setModalComissao('');
+            return;
+        }
+        setModalComissao(`${parseInt(digits, 10)}%`);
+    };
+
+    const openClosingModal = (lead) => {
+        setClosingLead(lead);
+        setModalNome(lead.Nome || lead.name || lead.nome || '');
+        setModalSeguradora(lead.Seguradora || lead.insurer || '');
+        setModalMeioPagamento(lead.MeioPagamento || '');
+        // CartaoPortoNovo deve ser 'Sim' ou 'Não'
+        setModalCartaoPortoNovo(lead.CartaoPortoNovo ? String(lead.CartaoPortoNovo) : 'Não');
+        setModalPremioLiquido(lead.PremioLiquido ? String(lead.PremioLiquido) : '');
+        // se a comissao vier como '10%' mantém; se vier '10' converte
+        const com = lead.Comissao ?? lead.comissao ?? '';
+        setModalComissao(com ? (String(com).includes('%') ? String(com) : `${String(extractDigits(com) || com)}%`) : '');
+        setModalParcelamento(lead.Parcelamento ? String(lead.Parcelamento) : '1');
+        const hoje = new Date();
+        setModalVigenciaInicial(toDateInputValue(hoje));
+        setModalVigenciaFinal(toDateInputValue(addOneYearToDate(hoje))); // Ajustado aqui
+        setIsClosingModalOpen(true);
+    };
+
+    const closeClosingModal = () => {
+        setIsClosingModalOpen(false);
+        setClosingLead(null);
+        setIsSubmittingClose(false);
+        // reset modal values (opcional)
+        // setModalNome('');
+        // ...
+    };
+
+    // Ao submeter o fechamento (Concluir Venda)
+    const handleConcluirVenda = async () => {
+        if (!closingLead) return;
+        setIsSubmittingClose(true);
+
+        try {
+            const leadId = String(closingLead.id);
+            // Converte datas do input para ISO strings
+            const vigIniISO = modalVigenciaInicial ? new Date(`${modalVigenciaInicial}T00:00:00`).toISOString() : '';
+            const vigFinISO = modalVigenciaFinal ? new Date(`${modalVigenciaFinal}T00:00:00`).toISOString() : '';
+
+            // --- NOVO: grava também em 'renovacoes' (mesmo payload, mesmo doc id) ---
+            try {
+                const renovRef = doc(db, 'renovacoes', leadId);
+                const renovPayload = {
+                    ID: closingLead.ID ?? closingLead.id ?? leadId,
+                    id: leadId,
+                    Nome: modalNome,
+                    name: modalNome,
+                    Modelo: closingLead.Modelo ?? closingLead.vehicleModel ?? '',
+                    AnoModelo: closingLead.AnoModelo ?? closingLead.vehicleYearModel ?? '',
+                    Cidade: closingLead.Cidade ?? closingLead.city ?? '',
+                    Telefone: closingLead.Telefone ?? closingLead.phone ?? '',
+                    TipoSeguro: closingLead.TipoSeguro ?? closingLead.insuranceType ?? '',
+                    usuarioId: null, // Responsavel sem preenchimento
+                    Seguradora: modalSeguradora || '',
+                    MeioPagamento: modalMeioPagamento || '',
+                    CartaoPortoNovo: modalMeioPagamento === 'CP' ? (modalCartaoPortoNovo || 'Não') : '',
+                    PremioLiquido: modalPremioLiquido || '',
+                    Comissao: modalComissao || '',
+                    Parcelamento: modalParcelamento || '',
+                    VigenciaInicial: vigIniISO || '',
+                    VigenciaFinal: vigFinISO || '',
+                    Status: '', // Status sem preenchimento
+                    Observacao: closingLead.observacao ?? closingLead.Observacao ?? '',
+                    Responsavel: '', // Responsavel sem preenchimento
+                    Data: closingLead.Data ?? formatDDMMYYYYFromISO(closingLead.createdAt) ?? '',
+                    createdAt: closingLead.createdAt ?? null,
+                    closedAt: serverTimestamp(),
+                    registeredAt: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString(), // Data atual + 1 ano
+                };
+                await setDoc(renovRef, renovPayload);
+            } catch (errRenov) {
+                console.error('Erro ao gravar em renovacoes:', errRenov);
+                // não interrompe o fluxo principal; só registra o erro
+            }
+            // --- FIM gravação em renovacoes ---
+
+            // Atualiza lead original: status, closedAt e campos de venda/nome
+            const originalRef = doc(db, 'renovacoes', leadId);
+            const updatePayload = {
+                status: 'Fechado',
+                closedAt: serverTimestamp(),
+                Seguradora: modalSeguradora || '',
+                PremioLiquido: modalPremioLiquido || '',
+                Comissao: modalComissao || '',
+                Parcelamento: modalParcelamento || '',
+                MeioPagamento: modalMeioPagamento || '',
+                CartaoPortoNovo: modalMeioPagamento === 'CP' ? (modalCartaoPortoNovo || 'Não') : '',
+                VigenciaInicial: vigIniISO || '',
+                VigenciaFinal: vigFinISO || '',
+                Nome: modalNome,
+                name: modalNome,
+                insurerConfirmed: true, // Marca como confirmado para exibir o layout de fechado
+            };
+
+            // aplica também saveLocalChange para manter sincronização local se existir a função
+            // if (typeof saveLocalChange === 'function') {
+            //     saveLocalChange({
+            //         id: leadId,
+            //         type: 'alterar_seguradora',
+            //         data: {
+            //             leadId,
+            //             Seguradora: modalSeguradora || '',
+            //             PremioLiquido: modalPremioLiquido || '',
+            //             Comissao: modalComissao || '',
+            //             Parcelamento: modalParcelamento || '',
+            //             MeioPagamento: modalMeioPagamento || '',
+            //             CartaoPortoNovo: modalMeioPagamento === 'CP' ? (modalCartaoPortoNovo || 'Não') : '',
+            //             VigenciaInicial: vigIniISO || '',
+            //             VigenciaFinal: vigFinISO || '',
+            //             Nome: modalNome,
+            //             insurerConfirmed: true,
+            //         },
+            //     });
+            // }
+
+            await updateDoc(originalRef, updatePayload);
+
+            // sucesso: fecha modal e deixa o listener atualizar a lista automaticamente
+            closeClosingModal();
+            alert('Venda concluída e registrada com sucesso.');
+        } catch (err) {
+            console.error('Erro ao concluir venda:', err);
+            alert('Erro ao concluir venda. Veja o console para detalhes.');
+            setIsSubmittingClose(false);
+        }
+    };
 
 
     // --- Renderização do Layout ---
@@ -681,7 +887,7 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
                                 {/* COLUNA 1: Informações do Lead */}
                                 <div className="col-span-1 border-r lg:pr-6">
                                     <div className="mb-3">
-                                        <span className={`text-xs font-bold px-3 py-1 rounded-full ${lead.status.startsWith('Agendado') ? 'bg-cyan-100 text-cyan-800' : lead.status === 'Em Contato' ? 'bg-yellow-100 text-yellow-800' : lead.status === 'Sem Contato' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}`}>
+                                        <span className={`text-xs font-bold px-3 py-1 rounded-full ${lead.status.startsWith('Agendado') ? 'bg-cyan-100 text-cyan-800' : lead.status === 'Em Contato' ? 'bg-yellow-100 text-yellow-800' : lead.status === 'Sem Contato' ? 'bg-red-100 text-red-800' : lead.status === 'Fechado' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
                                             {getFullStatus(lead.status)}
                                         </span>
                                     </div>
@@ -698,7 +904,15 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
                                         <p className="text-sm font-semibold text-gray-700">
                                             Vigência Final: <strong className="text-indigo-600">{formatarData(lead.VigenciaFinal)}</strong>
                                         </p>
-                                        {/* Botão de Cancelar Apólice removido conforme solicitação */}
+                                        {/* Botão de Fechar Venda */}
+                                        {lead.status !== 'Fechado' && (
+                                            <button
+                                                onClick={() => handleConfirmStatus(lead.id, 'Fechado')}
+                                                className="ml-4 px-3 py-1 bg-green-500 text-white text-xs font-semibold rounded-full hover:bg-green-600 transition duration-150 shadow-sm"
+                                            >
+                                                <CheckCircle size={14} className="inline-block mr-1" /> Fechar Venda
+                                            </button>
+                                        )}
                                     </div>
                                     <p className="mt-1 text-xs text-gray-400">
                                         Registrado em: {formatarData(lead.registeredAt)}
@@ -810,8 +1024,96 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
                     <ChevronRight size={20} />
                 </button>
             </div>
+
+            {/* Modal de Fechamento de Venda */}
+            {isClosingModalOpen && closingLead && (
+                <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl">
+                        <h2 className="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Concluir Venda: {closingLead.Nome}</h2>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Nome do Cliente</label>
+                                <input type="text" value={modalNome} onChange={(e) => setModalNome(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Seguradora</label>
+                                <select value={modalSeguradora} onChange={(e) => setModalSeguradora(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm">
+                                    <option value="">Selecione</option>
+                                    <option value="Porto Seguro">Porto Seguro</option>
+                                    <option value="Azul Seguros">Azul Seguros</option>
+                                    <option value="Itau Seguros">Itau Seguros</option>
+                                    <option value="Tokio Marine">Tokio Marine</option>
+                                    <option value="Yelum Seguros">Yelum Seguros</option>
+                                    <option value="Suhai Seguros">Suhai Seguros</option>
+                                    <option value="Allianz Seguros">Allianz Seguros</option>
+                                    <option value="Bradesco Seguros">Bradesco Seguros</option>
+                                    <option value="Mitsui Seguros">Mitsui Seguros</option>
+                                    <option value="Hdi Seguros">Hdi Seguros</option>
+                                    <option value="Aliro Seguros">Aliro Seguros</option>
+                                    <option value="Zurich Seguros">Zurich Seguros</option>
+                                    <option value="Alfa Seguros">Alfa Seguros</option>
+                                    <option value="Demais Seguradoras">Demais Seguradoras</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Meio de Pagamento</label>
+                                <select value={modalMeioPagamento} onChange={(e) => setModalMeioPagamento(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm">
+                                    <option value="">Selecione</option>
+                                    <option value="CP">Cartão de Crédito Porto</option>
+                                    <option value="CC">Cartão de Crédito</option>
+                                    <option value="Debito">Débito</option>
+                                    <option value="Boleto">Boleto</option>
+                                </select>
+                            </div>
+                            {modalMeioPagamento === 'CP' && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Cartão Porto Novo?</label>
+                                    <select value={modalCartaoPortoNovo} onChange={(e) => setModalCartaoPortoNovo(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm">
+                                        <option value="Não">Não</option>
+                                        <option value="Sim">Sim</option>
+                                    </select>
+                                </div>
+                            )}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Prêmio Líquido</label>
+                                <input type="text" value={modalPremioLiquido} onChange={handlePremioChange} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm" placeholder="R$ 0,00" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Comissão (%)</label>
+                                <input type="text" value={modalComissao} onChange={handleComissaoChange} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm" placeholder="Ex: 10%" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Parcelamento</label>
+                                <select value={modalParcelamento} onChange={(e) => setModalParcelamento(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm">
+                                    {[...Array(12)].map((_, i) => (
+                                        <option key={i + 1} value={String(i + 1)}>{i + 1}x</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Vigência Inicial</label>
+                                <input type="date" value={modalVigenciaInicial} onChange={(e) => setModalVigenciaInicial(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Vigência Final</label>
+                                <input type="date" value={modalVigenciaFinal} onChange={(e) => setModalVigenciaFinal(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm" />
+                            </div>
+                        </div>
+
+                        <div className="flex justify-end gap-3 mt-6">
+                            <button onClick={closeClosingModal} className="px-4 py-2 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400 transition duration-150">
+                                Cancelar
+                            </button>
+                            <button onClick={handleConcluirVenda} disabled={isSubmittingClose} className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition duration-150 disabled:opacity-50">
+                                {isSubmittingClose ? 'Concluindo...' : 'Concluir Venda'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
 
-export default Renovacoes;
+export default Renovacoes;.
