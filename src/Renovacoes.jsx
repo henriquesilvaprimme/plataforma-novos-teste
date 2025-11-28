@@ -665,7 +665,7 @@ const Renovacoes = ({ usuarios, onUpdateStatus, transferirLead, usuarioLogado, s
                     Cidade: closingLead.Cidade ?? closingLead.city ?? '',
                     Telefone: closingLead.Telefone ?? closingLead.phone ?? '',
                     TipoSeguro: closingLead.TipoSeguro ?? closingLead.insuranceType ?? '',
-                    usuarioId: null, // Responsavel sem preenchimento
+                    usuarioId: closingLead.usuarioId ?? null, // Mantém o usuarioId do lead original
                     Seguradora: modalSeguradora || '',
                     MeioPagamento: modalMeioPagamento || '',
                     CartaoPortoNovo: modalMeioPagamento === 'CP' ? (modalCartaoPortoNovo || 'Não') : '',
