@@ -192,7 +192,6 @@ const Lead = ({ lead, onUpdateStatus, disabledConfirm, isAdmin }) => {
       <p><strong>Prêmio Líquido:</strong> {formatCurrency(lead.PremioLiquido)}</p>
       <p><strong>Comissão:</strong> {lead.Comissao}%</p>
       <p><strong>Parcelamento:</strong> {lead.Parcelamento || 'N/A'}</p>
-      <p><strong>Vigência Final:</strong> {formatDateDisplay(lead.VigenciaFinal) || 'N/A'}</p>
       {/* FIM DOS CAMPOS ATUALIZADOS */}
       
       <div style={{ marginTop: '15px', display: 'flex', alignItems: 'center', gap: '10px' }}>
