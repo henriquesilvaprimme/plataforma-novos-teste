@@ -177,10 +177,16 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
         setValores(prevValores => {
             const novosValores = { ...prevValores };
             renovadosOrdenados.forEach(lead => {
-                // AJUSTE AQUI: Garantindo que PremioLiquido seja um número para cálculo
-                const rawPremioFromApi = String(lead.PremioLiquido || '');
-                const premioFromApi = parseFloat(rawPremioFromApi.replace('.', '').replace(',', '.'));
-                const premioInCents = isNaN(premioFromApi) || rawPremioFromApi === '' ? null : Math.round(premioFromApi * 100);
+                // AJUSTE AQUI: Tratamento do PremioLiquido para garantir que seja um número para cálculo
+                let premioInCents = null;
+                if (lead.PremioLiquido !== undefined && lead.PremioLiquido !== null && lead.PremioLiquido !== '') {
+                    let rawPremio = String(lead.PremioLiquido).replace(/[^\d,.]/g, ''); // Remove caracteres indesejados
+                    rawPremio = rawPremio.replace(/\./g, '').replace(',', '.'); // Troca vírgula por ponto e remove pontos de milhar
+                    const premioFloat = parseFloat(rawPremio);
+                    if (!isNaN(premioFloat)) {
+                        premioInCents = Math.round(premioFloat * 100);
+                    }
+                }
 
                 const apiComissao = lead.Comissao ? String(lead.Comissao).replace('.', ',') : '';
                 const apiParcelamento = lead.Parcelamento || '';
@@ -236,10 +242,10 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
         setPremioLiquidoInputDisplay(prevDisplay => {
             const newDisplay = { ...prevDisplay };
             renovadosOrdenados.forEach(lead => {
-                const currentPremio = String(lead.PremioLiquido || '');
-                if (currentPremio !== '') {
-                    const premioFloat = parseFloat(currentPremio.replace(',', '.'));
-                    newDisplay[lead.id] = isNaN(premioFloat) ? '' : premioFloat.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                // AJUSTE AQUI: Exibição do PremioLiquido
+                const currentPremioCentavos = valores[`${lead.id}`]?.PremioLiquido;
+                if (currentPremioCentavos !== null && currentPremioCentavos !== undefined) {
+                    newDisplay[lead.id] = formatarMoeda(currentPremioCentavos);
                 } else if (prevDisplay[lead.id] === undefined) {
                     newDisplay[lead.id] = '';
                 }
@@ -271,7 +277,7 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
         });
         // --------------------------------------------------------------------------------
 
-    }, [allRenovados, filtroNome, filtroData]); // Dependências atualizadas para o novo fluxo de filtragem local
+    }, [allRenovados, filtroNome, filtroData, valores]); // AJUSTE AQUI: Adicionado 'valores' como dependência para re-renderizar o PremioLiquidoInputDisplay
 
 
     // --- FUNÇÕES DE HANDLER (NOVAS E EXISTENTES) ---
@@ -573,7 +579,10 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
                     </div>
                 ) : (
                     leadsPagina.map((lead) => {
-                        const responsavel = usuarios.find((u) => u.nome === lead.Responsavel);
+                        // AJUSTE AQUI: Buscando o nome do responsável
+                        const responsavelObj = usuarios.find((u) => u.nome === lead.Responsavel);
+                        const nomeResponsavel = responsavelObj ? responsavelObj.nome : 'N/A';
+
                         const isSeguradoraPreenchida = !!lead.Seguradora;
                         
                         // Lógica para verificar se a seguradora atual e o meio de pagamento REQUEREM o campo Cartão Porto Novo
@@ -611,16 +620,16 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
                                     <h3 className="text-xl font-bold text-gray-900 mb-2">{lead.name}</h3>
                                     
                                     <div className="space-y-1 text-sm text-gray-700">
-                                        {/* AJUSTE AQUI: Exibindo os campos solicitados */}
                                         <p><strong>Modelo:</strong> {lead.Modelo || 'N/A'}</p>
                                         <p><strong>Ano/Modelo:</strong> {lead.AnoModelo || 'N/A'}</p>
                                         <p><strong>Cidade:</strong> {lead.Cidade || 'N/A'}</p>
                                         <p><strong>Telefone:</strong> {lead.Telefone || 'N/A'}</p>
                                     </div>
 
-                                    {responsavel && isAdmin && (
+                                    {/* AJUSTE AQUI: Exibindo o responsável */}
+                                    {lead.Responsavel && (
                                         <p className="mt-4 text-sm font-semibold text-green-600 bg-green-50 p-2 rounded-lg">
-                                            Transferido para: <strong>{responsavel.nome}</strong>
+                                            Transferido para: <strong>{nomeResponsavel}</strong>
                                         </p>
                                     )}
                                 </div>
