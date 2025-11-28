@@ -64,6 +64,35 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
         return ''; // Retorna vazio se não conseguir formatar
     };
 
+    // NOVO: Função para parsear a string "28 de novembro de 2025 às 00:48:48 UTC-3" para um objeto Date
+    const parseRegisteredAtString = (registeredAtString) => {
+        if (!registeredAtString || typeof registeredAtString !== 'string') {
+            return null;
+        }
+
+        // Mapeamento de meses para números
+        const meses = {
+            'janeiro': 0, 'fevereiro': 1, 'março': 2, 'abril': 3, 'maio': 4, 'junho': 5,
+            'julho': 6, 'agosto': 7, 'setembro': 8, 'outubro': 9, 'novembro': 10, 'dezembro': 11
+        };
+
+        // Regex para extrair dia, mês (nome), ano, hora, minuto, segundo
+        const regex = /(\d{1,2}) de (\w+) de (\d{4}) às (\d{2}):(\d{2}):(\d{2}) UTC/;
+        const match = registeredAtString.match(regex);
+
+        if (match) {
+            const [, dia, mesNome, ano, hora, minuto, segundo] = match;
+            const mesNumero = meses[mesNome.toLowerCase()];
+
+            if (mesNumero !== undefined) {
+                // Cria a data no fuso horário local para evitar problemas de UTC
+                const date = new Date(parseInt(ano), mesNumero, parseInt(dia), parseInt(hora), parseInt(minuto), parseInt(segundo));
+                return date;
+            }
+        }
+        return null;
+    };
+
     const normalizarTexto = (texto = '') => {
         return texto
             .toString()
@@ -112,26 +141,48 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
     const fetchRenovadosFromFirebase = async () => {
         setIsLoading(true);
         try {
-            let q = query(collection(db, 'renovados'), orderBy('registeredAt', 'desc')); // Alterado para orderBy('registeredAt', 'desc')
-
+            let q;
             if (filtroData) {
                 const [year, month] = filtroData.split('-').map(Number);
                 const startDate = new Date(year, month - 1, 1);
                 const endDate = new Date(year, month, 0, 23, 59, 59, 999); // Último milissegundo do mês
 
+                // Tenta filtrar por Timestamp no Firestore
                 q = query(
                     collection(db, 'renovados'),
                     where('registeredAt', '>=', Timestamp.fromDate(startDate)),
                     where('registeredAt', '<=', Timestamp.fromDate(endDate)),
-                    orderBy('registeredAt', 'desc') // Mantém a ordenação por registeredAt
+                    orderBy('registeredAt', 'desc')
                 );
+            } else {
+                q = query(collection(db, 'renovados'), orderBy('registeredAt', 'desc'));
             }
 
             const querySnapshot = await getDocs(q);
-            const renovadosData = querySnapshot.docs.map(doc => ({
+            let renovadosData = querySnapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
             }));
+
+            // FILTRO LOCAL ADICIONAL para lidar com 'registeredAt' como string
+            if (filtroData) {
+                const [filterYear, filterMonth] = filtroData.split('-').map(Number);
+                renovadosData = renovadosData.filter(lead => {
+                    let registeredDate = null;
+                    if (lead.registeredAt instanceof Timestamp) {
+                        registeredDate = lead.registeredAt.toDate();
+                    } else if (typeof lead.registeredAt === 'string') {
+                        registeredDate = parseRegisteredAtString(lead.registeredAt);
+                    }
+
+                    if (registeredDate) {
+                        return registeredDate.getFullYear() === filterYear &&
+                               registeredDate.getMonth() === (filterMonth - 1);
+                    }
+                    return false; // Se não conseguir parsear, não inclui
+                });
+            }
+
             setRenovadosFiltradosInterno(renovadosData);
         } catch (error) {
             console.error('Erro ao buscar leads renovados do Firebase:', error);
@@ -152,7 +203,7 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
     
     // --- EFEITO DE FILTRAGEM E SINCRONIZAÇÃO DE ESTADOS ---
     useEffect(() => {
-        const renovadosAtuais = renovadosFiltradosInterno; // Já estamos buscando apenas renovados
+        let renovadosAtuais = renovadosFiltradosInterno; // Já estamos buscando apenas renovados
 
         // --------------------------------------------------------------------------------
         // Sincronização de estados (Gerais)
@@ -252,12 +303,28 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
         });
         // --------------------------------------------------------------------------------
 
-        // ORDENAÇÃO: Ainda precisa de new Date() para ordenar corretamente
+        // ORDENAÇÃO: Agora usa 'registeredAt' para ordenação, priorizando Timestamp e depois a string parseada
         const renovadosOrdenados = [...renovadosAtuais].sort((a, b) => {
-            // Adiciona 'T00:00:00' para mitigar o fuso horário durante a ORDENAÇÃO
-            const dataA = new Date(getDataParaComparacao(a.Data) + 'T00:00:00');
-            const dataB = new Date(getDataParaComparacao(b.Data) + 'T00:00:00');
-            return dataB.getTime() - dataA.getTime();
+            let dateA = null;
+            if (a.registeredAt instanceof Timestamp) {
+                dateA = a.registeredAt.toDate();
+            } else if (typeof a.registeredAt === 'string') {
+                dateA = parseRegisteredAtString(a.registeredAt);
+            }
+
+            let dateB = null;
+            if (b.registeredAt instanceof Timestamp) {
+                dateB = b.registeredAt.toDate();
+            } else if (typeof b.registeredAt === 'string') {
+                dateB = parseRegisteredAtString(b.registeredAt);
+            }
+
+            if (dateA && dateB) {
+                return dateB.getTime() - dateA.getTime();
+            }
+            if (dateA) return -1; // A vem antes se B não tem data válida
+            if (dateB) return 1;  // B vem antes se A não tem data válida
+            return 0;
         });
 
         // Aplicação da lógica de filtragem (CORRIGIDA)
@@ -271,7 +338,7 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
         }
 
         setRenovadosFiltradosInterno(leadsFiltrados);
-    }, [leads, filtroNome, renovadosFiltradosInterno]); // Removido filtroData das dependências, pois já é tratado no useEffect
+    }, [filtroNome, renovadosFiltradosInterno]); // Removido filtroData das dependências, pois já é tratado no useEffect
     // O `renovadosFiltradosInterno` foi adicionado como dependência para que o filtro de nome seja aplicado sobre os dados já filtrados por data.
 
 
