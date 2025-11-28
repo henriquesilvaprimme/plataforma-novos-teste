@@ -147,15 +147,21 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
                 const startDate = new Date(year, month - 1, 1);
                 const endDate = new Date(year, month, 0, 23, 59, 59, 999); // Último milissegundo do mês
 
-                // Tenta filtrar por Timestamp no Firestore
+                // Busca por 'registeredAt' e 'Status' na coleção 'renovados'
                 q = query(
-                    collection(db, 'renovados'),
+                    collection(db, 'renovados'), // Coleção corrigida
                     where('registeredAt', '>=', Timestamp.fromDate(startDate)),
                     where('registeredAt', '<=', Timestamp.fromDate(endDate)),
+                    where('Status', '==', 'Fechado'), // Adicionado filtro de Status
                     orderBy('registeredAt', 'desc')
                 );
             } else {
-                q = query(collection(db, 'renovados'), orderBy('registeredAt', 'desc'));
+                // Busca todos os renovados com Status 'Fechado' se não houver filtro de data
+                q = query(
+                    collection(db, 'renovados'), // Coleção corrigida
+                    where('Status', '==', 'Fechado'), // Adicionado filtro de Status
+                    orderBy('registeredAt', 'desc')
+                );
             }
 
             const querySnapshot = await getDocs(q);
@@ -172,7 +178,11 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
                     if (lead.registeredAt instanceof Timestamp) {
                         registeredDate = lead.registeredAt.toDate();
                     } else if (typeof lead.registeredAt === 'string') {
-                        registeredDate = parseRegisteredAtString(lead.registeredAt);
+                        // O campo registeredAt na coleção renovados já está formatado como DD/MM/AAAA
+                        const parts = lead.registeredAt.split('/');
+                        if (parts.length === 3) {
+                            registeredDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+                        }
                     }
 
                     if (registeredDate) {
@@ -309,14 +319,22 @@ const Renovados = ({ leads, usuarios, onUpdateInsurer, onConfirmInsurer, onUpdat
             if (a.registeredAt instanceof Timestamp) {
                 dateA = a.registeredAt.toDate();
             } else if (typeof a.registeredAt === 'string') {
-                dateA = parseRegisteredAtString(a.registeredAt);
+                // O campo registeredAt na coleção renovados já está formatado como DD/MM/AAAA
+                const parts = a.registeredAt.split('/');
+                if (parts.length === 3) {
+                    dateA = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+                }
             }
 
             let dateB = null;
             if (b.registeredAt instanceof Timestamp) {
                 dateB = b.registeredAt.toDate();
             } else if (typeof b.registeredAt === 'string') {
-                dateB = parseRegisteredAtString(b.registeredAt);
+                // O campo registeredAt na coleção renovados já está formatado como DD/MM/AAAA
+                const parts = b.registeredAt.split('/');
+                if (parts.length === 3) {
+                    dateB = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+                }
             }
 
             if (dateA && dateB) {
